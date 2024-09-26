@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <chrono>
+#include <string>
 
 using namespace std;
 
