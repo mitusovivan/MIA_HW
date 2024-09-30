@@ -43,8 +43,10 @@ set<int> gen(int n){
 }
 
 int main(){
-    int n = (mt() % 100);
-    cout << n << '\n';
+    for (int j = 3; j < 7; j++){
+    //int n = (mt() % 100);
+    int n = pow(10, j);
+    cout << "For n = " << n << '\n';
     set<int> e;
     vector<int> a(n);
     vector<int> a1(n);
@@ -66,6 +68,7 @@ int main(){
     cout << " Shell time : " << elapsed_seconds . count () << "s\n";
     
     //using namespace std;
-    for (int i = 0; i < a.size(); i++) cout << a[i] << ' '; 
+    //for (int i = 0; i < a.size(); i++) cout << a[i] << ' '; 
+    }
     return 0;
 }
