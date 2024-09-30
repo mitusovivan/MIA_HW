@@ -31,4 +31,5 @@ int main(){
         if (l > 0) cout << pref[r] - pref[l - 1]<<'\n';   
         else cout <<  pref[r] << '\n';
     }
+    return 0;
 }
