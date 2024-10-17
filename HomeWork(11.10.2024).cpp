@@ -9,21 +9,27 @@ void random_gen(int len, std::string NumberOfIterration, std::string NumberOfIte
 int main()
 {
     srand(time(0));//Задание ключа генерации
+
     random_gen(10, "Первая", "первой");//функции печати
     random_gen(10, "Вторая", "второй");
     random_gen(10, "Третья", "третьей");
-    return 0;//
+
+    return 0;//выход из программы
 }
 
-void random_gen(int len, std::string NumberOfIterration, std::string NumberOfIterration2){//функция генератора
+void random_gen(int len, std::string NumberOfIterration, std::string NumberOfIterration2)//функция генератора
+{
     std::cout << NumberOfIterration << " последовательность:";//Вывод имени последовательности
-    int sum = 0;//сумма чисел
+    static int sum = 0;//сумма чисел
+
     for (int i = 0; i < len; i++){//генерация чисел
-        int unit = (rand() % 10);
+        static int unit = (rand() % 10);
         std::cout << ' ' << unit;
         sum += unit;
     }
-    float midow_arifmetic = float(sum) / len;//рассчёт ср.арифм
+
+    static float midow_arifmetic = float(sum) / len;//рассчёт ср.арифм
+
     std::cout << '\n' <<"Среднее арифметическое "<< NumberOfIterration2; //вывод
     std::cout <<" последовательности = " << midow_arifmetic << '\n';
 }
