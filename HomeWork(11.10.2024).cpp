@@ -1,35 +1,50 @@
-﻿#include <algorithm>//Подключение библиотек
+﻿#include <algorithm>
 #include <cmath>
 #include <ctime>
 #include <iostream>
-#include <string>
 
-void random_gen(int len, std::string NumberOfIterration, std::string NumberOfIterration2);//расположение функции генератора
+void random_gen(int* arr, const int len);
+void print_array(const int comment, const float midow, int* arr, const int size);
+float midow_arithmetic(int* arr, const int len);
 
 int main()
 {
-    srand(time(0));//Задание ключа генерации
+    srand(time(0));
+    
+    int arr_size = 10;
+    int* arr = new int[arr_size];
 
-    random_gen(10, "Первая", "первой");//функции печати
-    random_gen(10, "Вторая", "второй");
-    random_gen(10, "Третья", "третьей");
-
-    return 0;//выход из программы
-}
-
-void random_gen(int len, std::string NumberOfIterration, std::string NumberOfIterration2)//функция генератора
-{
-    std::cout << NumberOfIterration << " последовательность:";//Вывод имени последовательности
-    static int sum = 0;//сумма чисел
-
-    for (int i = 0; i < len; i++){//генерация чисел
-        static int unit = (rand() % 10);
-        std::cout << ' ' << unit;
-        sum += unit;
+    for (int i = 0; i < 3; i++){
+        random_gen(arr, arr_size);
+        print_array((i + 1), midow_arithmetic(arr, arr_size), arr, arr_size);
     }
 
-    static float midow_arifmetic = float(sum) / len;//рассчёт ср.арифм
+    delete[] arr;
+    return 0;
+}
 
-    std::cout << '\n' <<"Среднее арифметическое "<< NumberOfIterration2; //вывод
-    std::cout <<" последовательности = " << midow_arifmetic << '\n';
+void random_gen(int* arr, const int len)
+{
+    for (int i = 0; i < len; i++){
+        arr[i] = (rand() % 10);
+    }
+}
+
+void print_array(const int comment, const float midow, int* arr, const int size)
+{
+    std::cout << "Последовательность № " << comment <<':';
+    for (int i = 0; i < size; i++){
+        std::cout << ' ' << arr[i];
+    }
+    std::cout << '\n' <<"Среднее арифметическое последовательности № " << comment; 
+    std::cout  << " = " << midow << '\n';
+}
+
+float midow_arithmetic(int* arr, const int len)
+{
+    int sum = 0;
+    for (int i = 0; i < len; i++){
+        sum += arr[i];
+    }
+    return sum / float(len);
 }
