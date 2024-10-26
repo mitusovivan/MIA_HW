@@ -1,8 +1,6 @@
 #include "do_merge_sort.hpp"
-#include "generate_arrange.hpp"
-#include "make_random.hpp"
-#include "print.hpp"
-#include "print_arrange.hpp"
+#include "io.hpp"
+#include "utility.hpp"
 
 #include <conio.h>
 
