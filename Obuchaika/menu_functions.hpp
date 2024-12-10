@@ -6,7 +6,6 @@ namespace MIA {
     const MenuItem* show_menu(const MenuItem* current);
     
     const MenuItem* exit(const MenuItem* current);
-    //const MenuItem* study();
 
     const MenuItem* study_go_back(const MenuItem* current);
     const MenuItem* study_class_one(const MenuItem* current);
@@ -19,3 +18,5 @@ namespace MIA {
     const MenuItem* study_class_one_math(const MenuItem* current);
     const MenuItem* study_class_one_fisculture(const MenuItem* current);
 }
+
+    //const MenuItem* study();

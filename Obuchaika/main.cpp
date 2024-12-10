@@ -1,4 +1,3 @@
-#include <clocale>
 #include <iostream>
 
 #include "menu.hpp"
@@ -7,10 +6,14 @@
 
 
 int main(){
-    std::setlocale(LC_ALL, "");
-
     const MIA::MenuItem* current = &MIA::MAIN;
     do {
+        current = current->funct(current);
+    }while (true);
+    
+    return 0;    
+}
+
         /*std::cout << "Главное Меню:" << std::endl;
         for (int i = 1; i < main_size; i++){
             std::cout << main_children[i]->title << std::endl;
@@ -23,8 +26,5 @@ int main(){
 
         main.children[user_input]->funct(main.children[user_input]);
     */
-        current = current->funct(current);
-    }while (true);
-    
-    return 0;    
-}
+       //std::setlocale(LC_ALL, "");
+       //#include <clocale>

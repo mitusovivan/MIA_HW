@@ -22,10 +22,6 @@ const MIA::MenuItem* MIA::exit(const MenuItem* current){
     std::exit(0);
 }
 
-/*const MIA::MenuItem* MIA::study(){
-
-}*/
-
 const MIA::MenuItem* MIA::study_go_back(const MenuItem* current){
     std::cout << current->title << std::endl << std::endl;
     return current->parent->parent;
@@ -79,3 +75,7 @@ const MIA::MenuItem* MIA::study_class_one_fisculture(const MenuItem* current){
     std::cout << current->title << std::endl << std::endl;
     return current->parent;
 }
+
+/*const MIA::MenuItem* MIA::study(){
+
+}*/
