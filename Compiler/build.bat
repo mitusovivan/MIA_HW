@@ -22,8 +22,8 @@ set arr[1].file=run1.bat
 set arr[0].folder=merge_sort
 set arr[1].folder=Obuchaika
 
-for /L %%i in (0,1,5) do {
-    copy ..\%SOURCE_FOLDER%\!arr[%%i].folder!\!arr[%%i].file! .\!arr[%%i].folder!
-}
+copy ..\%SOURCE_FOLDER%\!arr[0].folder!\!arr[0].file! .\!arr[0].folder!
+copy ..\%SOURCE_FOLDER%\!arr[1].folder!\!arr[1].file! .\!arr[1].folder!
+
 
 copy ..\run_test.bat .

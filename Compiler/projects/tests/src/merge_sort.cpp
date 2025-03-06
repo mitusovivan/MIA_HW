@@ -1,7 +1,8 @@
-#include "do_merge_sort.hpp"
+#include "merge_sort.hpp"
 
 #include <cmath>
 #include <limits>
+#include <vector>
 
 void mia::do_merge(int * const arr, const int l, const int q, const int r){
     float left[q - l + 1], right[r - q + 1];

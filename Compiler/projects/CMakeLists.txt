@@ -6,6 +6,7 @@ enable_testing()
 add_subdirectory(lib/googletest)
 
 add_subdirectory(merge_sort)
+
 add_subdirectory(tests)
 add_subdirectory(Obuchaika)
 
