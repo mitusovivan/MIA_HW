@@ -17,7 +17,7 @@ TEST(ArraysEqual, AnyElementsCount){
     for (int i = 0; i < arr_len; i++) expected[i] = actual[i];
 
     std::sort(expected, expected + arr_len);
-    expected[0] = -1;
+    //xpected[0] = -1;
 
     //ASSERT_EQ(n, m) << "Разные";
 
