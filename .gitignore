@@ -31,6 +31,6 @@
 *.out
 *.app
 
-build_Ninja
-lib
-.vscode
+build_Ninja/
+lib/
+.vscode/
