@@ -117,7 +117,7 @@ class FComparisons : public testing::Test {
 			p_1{"1"}, p_1_copy{"1"}, p_12{"12"}, p_16{"16"};
 };
 
-/*TEST_F(FComparisons, equal) {
+TEST_F(FComparisons, equal) {
 	EXPECT_TRUE(p_1 == p_1_copy) << "EXPECT_TRUE: 1 == 1";
 	EXPECT_FALSE(n_1 == p_1) << "EXPECT_FALSE: -1 == 1";
 	EXPECT_FALSE(p_1 == p_12) << "EXPECT_FALSE: 1 == 12";
@@ -150,7 +150,7 @@ TEST_F(FComparisons, less) {
 	EXPECT_FALSE(p_12 < p_1) << "12 < 1";
 //	EXPECT_TRUE(p_98 < p_12) << "98 > 12";
 }
-*/
+
 
 class FArithmetic : public testing::Test {
 	public:
@@ -159,29 +159,29 @@ class FArithmetic : public testing::Test {
 			n_16{"-16"}, n_15{"-15"},
 			n_7{"-7"}, n_4{"-4"}, n_3{"-3"}, n_2{"-2"}, n_1{"-1"},
 		
-			p_0{"0"}, p_1{"1"}, p_1_copy{"1"}, p_2{"2"}, p_3{"3"},
-			p_4{"4"}, p_6{"6"}, p_12{"12"}, p_16{"16"}, p_17{"17"}, 
+			p_0{"0"}, p_1{"1"}, p_1_copy{"1"}, p_2{"2"}, p_2_copy{"2"}, p_3{"3"},
+			p_4{"4"}, p_6{"6"}, p_10{"10"}, p_10_copy{"10"}, p_12{"12"}, p_16{"16"}, p_17{"17"}, 
 			p_99{"99"}, p_99_copy{"99"}, 
-			p_113{"113"}, p_198{"198"}, p_1188{"1188"}, p_19602{"19602"},
+			p_113{"113"}, p_198{"198"}, p_1000{"1000"}, p_1188{"1188"}, p_19602{"19602"},
 			
-			n_100{"-100"}, n_6{"-6"}, p_100{"100"}, p_{"6"};
+			n_100{"-100"}, n_6{"-6"}, p_100{"100"}, p_100_copy{"100"}, p_{"6"};
 };
 
 TEST_F(FArithmetic, summ) {
-	//EXPECT_EQ(p_2, p_1 + p_1_copy) << "1 + 1 = 2";
-	//EXPECT_EQ(p_0, p_1 + n_1) << "1 + (-1) = 0";
+	EXPECT_EQ(p_2, p_1 + p_1_copy) << "1 + 1 = 2";
+	EXPECT_EQ(p_0, p_1 + n_1) << "1 + (-1) = 0";
 	EXPECT_EQ(p_198, p_99 + p_99_copy) << "99 + 99 = 198";	
-	//EXPECT_EQ(n_87, n_99 + p_12) << "-99 + 12 = -87";	
-	//EXPECT_EQ(n_87, p_12 + n_99) << "12 + (-99) = -87";	
+	EXPECT_EQ(n_87, n_99 + p_12) << "-99 + 12 = -87";	
+	EXPECT_EQ(n_87, p_12 + n_99) << "12 + (-99) = -87";	
 }
-
-/*TEST_F(FArithmetic, substraction) {
-	//EXPECT_EQ(p_0, p_1 - p_1_copy) << "1 - 1 = 0";
+ 
+TEST_F(FArithmetic, substraction) {
+	EXPECT_EQ(p_0, p_1 - p_1_copy) << "1 - 1 = 0";
 	EXPECT_EQ(p_2, p_1 - n_1) << "1 + (-1) = 2";
-	//EXPECT_EQ(n_87, p_12 - p_99) << "12 - 99 = -87";
+	EXPECT_EQ(n_87, p_12 - p_99) << "12 - 99 = -87";
 }
 
-/*TEST_F(FArithmetic, multiply) {
+TEST_F(FArithmetic, multiply) {
 	EXPECT_EQ(p_1, p_1 * p_1_copy) << "1 * 1 = 1";
 	EXPECT_EQ(n_1, p_1 * n_1) << "1 * (-1) = -1";
 	EXPECT_EQ(p_0, p_0 * p_99) << "0 * 99 = 0";
@@ -191,10 +191,11 @@ TEST_F(FArithmetic, summ) {
 
 TEST_F(FArithmetic, division) {
 	EXPECT_EQ(p_2, p_2 / p_1) << "2 / 1 = 2";
+	EXPECT_EQ(p_10, p_100 / p_10_copy) << "";
+	EXPECT_EQ(p_1, p_2 / p_2_copy) << "2 / 2 = 1";
 	EXPECT_EQ(p_198, p_19602 / p_99) << "19602 / 99 = 198";
 	EXPECT_EQ(p_99, n_19602 / p_198 / n_1) << "-19602 / 198 / -1  = 99";
 }
-
 TEST_F(FArithmetic, division_full_sign_example) {
 	EXPECT_EQ(p_16, p_100 / p_6) << "100 / 6 = 16";
 	EXPECT_EQ(n_16, p_100 / n_6) << "100 / -6 = -16";
@@ -215,7 +216,7 @@ TEST_F(FArithmetic, remainder_full_sign_example) {
 	EXPECT_EQ(p_4, p_100 % n_6) << "100 % -6 = 4";
 	EXPECT_EQ(p_2, n_100 % p_6) << "-100 % 6 = 2";
 	EXPECT_EQ(p_2, n_100 % n_6) << "-100 % -6 = 2";
-}*/
+}
 
 int main(int argc, char **argv) {
 	::testing::InitGoogleTest(&argc, argv);

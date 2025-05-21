@@ -37,6 +37,7 @@ namespace mia {
 			int get_rank_number(const int rank) const;
 			bool is_negative() const noexcept;
 			bool delt(int* a, int* b, int len) const;
+			//int* prov(int* a, int* b, int len_a, int len_b) const;
 			
 			friend std::ostream& operator << (std::ostream &os, const LongNumber& x);
 			
