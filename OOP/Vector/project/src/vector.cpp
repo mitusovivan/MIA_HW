@@ -5,7 +5,7 @@
 using mia::Vector;
 
 template<typename T>
-const std::size_t Vector<T>::START_CAPACITY = 10;
+const std::size_t Vector<T>::START_CAPACITY = 35;
 
 template<typename T>
 Vector<T>::Vector() {
