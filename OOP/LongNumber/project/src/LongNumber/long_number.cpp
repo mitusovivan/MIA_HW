@@ -109,7 +109,7 @@ bool LongNumber::operator == (const LongNumber& x) const {
 }
 
 bool LongNumber::operator != (const LongNumber& x) const {
-	return !operator== (x);
+	return ! (*this == x);
 }
 
 bool LongNumber::operator > (const LongNumber& x) const {
@@ -145,7 +145,7 @@ LongNumber LongNumber::operator + (const LongNumber& x) const {
 		}
 		Sum.sign = x.sign * -1;
 		Sum.numbers = sum;
-		return (*this).operator-(Sum);
+		return (*this).operator - (Sum);
 
 	}
 
@@ -197,7 +197,8 @@ LongNumber LongNumber::operator - (const LongNumber& x) const {
 			LongNumber sum = abs_this_copy + abs_x_copy;
 			sum.sign *= -1; 
 			return sum;
-        } 
+    } 
+
 	bool this_abs_greater = false;
 	if (length > x.length) {
 		this_abs_greater = true;

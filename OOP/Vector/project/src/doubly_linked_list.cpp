@@ -78,8 +78,9 @@ bool DoublyLinkedList<T>::remove_first(const T& value) noexcept {
 	while (lst)
 	{
 		if (lst->value == value){
-			if (lst == begin && lst == end) begin = end = nullptr;
-			else if (lst == begin) {
+			if (lst == begin && lst == end) {
+				begin = end = nullptr;
+			} else if (lst == begin) {
 				begin = lst->next;
 				begin->prev = nullptr;
 			} else if (lst == end) {

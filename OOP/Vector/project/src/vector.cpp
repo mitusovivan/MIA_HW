@@ -15,6 +15,8 @@ Vector<T>::Vector() {
 template<typename T>
 Vector<T>::~Vector() {
 	delete [] arr;
+	arr = nullptr;
+	capacity = START_CAPACITY;
 }
 
 template<typename T>
@@ -33,6 +35,7 @@ bool Vector<T>::has_item(const T& value) const noexcept {
 template<typename T>
 bool Vector<T>::insert(const std::size_t position, const T& value) {
 	if ((position < 0) || (position > size)) return false;
+
 	if (size == capacity){
 		capacity = capacity * 2;
 		T* arr2 = new T[capacity];
@@ -41,7 +44,7 @@ bool Vector<T>::insert(const std::size_t position, const T& value) {
 		std::copy(arr + position, arr + size, arr2 + position + 1);
 		delete [] arr;
 		arr = arr2;
-	}else{
+	} else {
 		for (std::size_t i = size; i > position; --i) arr[i] = arr[i - 1];
 		arr[position] = value;
 	}
@@ -79,7 +82,9 @@ template<typename T>
 bool Vector<T>::remove_first(const T& value) {
 	for (std::size_t i = 0; i < size; ++i) {
         if (arr[i] == value) {
-            for (std::size_t j = i; j < size - 1; ++j) arr[j] = arr[j + 1];
+            for (std::size_t j = i; j < size - 1; ++j) {
+				arr[j] = arr[j + 1];
+			}
             size--;
             return true;
         }
