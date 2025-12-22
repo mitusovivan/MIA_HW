@@ -1,0 +1,2 @@
+hashcat -a 3 -m 0 -w 4 C:\Users\Иван\MIA_HW\Algorithms\ThirdLab\clean_hashes.txt -O "?d?d?d?d?d?d?d?d?d?d?d" -o cracked_numbers_with_offset_full.txt --remove
+https://hashcat.net/hashcat/
