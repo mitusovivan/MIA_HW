@@ -1,7 +1,9 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import csv
+from functools import reduce
 import hashlib
+import random
 import os
 import subprocess
 import tempfile
@@ -10,10 +12,6 @@ CSV_DELIMITER = ';'
 ENCODING = 'cp1251'
 HASHCAT_DIR = 'hashcat-7.1.2'
 HASHCAT_EXE = 'hashcat.exe'
-PHONE_NUMBER_LENGTH = 11
-PROGRESS_UPDATE_INTERVAL = 2
-SALT_OFFSET_B = 11111
-SALT_OFFSET_C = 22222
 
 class App:
     def __init__(self, master):
@@ -23,14 +21,11 @@ class App:
         self.all_hashes = []
         self.known_pairs = {}
         self.all_data_rows = [] 
-        self._last_output_rows = None
         
         self.input_file_path = tk.StringVar()
         self.encryption_input_path = tk.StringVar()
-        self.encryption_salt_var = tk.StringVar(value="2664715826")
         self.salt_result_var = tk.StringVar()
         self.salt_result_var.set("Соль: не определена")
-        self.progress_var = tk.StringVar(value="Прогресс дешифровки: 0%")
         
         self._temp_hash_file_path = None
         self._temp_output_file_path = None
@@ -58,11 +53,6 @@ class App:
         text_widget.config(state=tk.DISABLED)
         text_widget.see(tk.END)
 
-    def update_progress(self, percent):
-        percent = max(0, min(100, int(percent)))
-        self.progress_var.set(f"Прогресс дешифровки: {percent}%")
-        self.master.update_idletasks()
-
     def select_file(self, var):
         filename = filedialog.askopenfilename(
             title="Выберите файл",
@@ -81,15 +71,11 @@ class App:
 
         ttk.Label(frame, textvariable=self.salt_result_var, font=('Arial', 10, 'bold')).grid(row=1, column=0, columnspan=3, pady=10)
 
-        ttk.Label(frame, textvariable=self.progress_var, font=('Arial', 10)).grid(row=2, column=0, columnspan=3, pady=5)
-
-        ttk.Button(frame, text="Запустить деобезличивание", command=self.run_full_decryption_process).grid(row=3, column=0, columnspan=3, pady=15)
-        self.download_button = ttk.Button(frame, text="Скачать деобезличенный отчет", command=self.download_last_result, state=tk.DISABLED)
-        self.download_button.grid(row=4, column=0, columnspan=3, pady=5)
+        ttk.Button(frame, text="Запустить деобезличивание", command=self.run_full_decryption_process).grid(row=2, column=0, columnspan=3, pady=15)
         
-        ttk.Label(frame, text="Статус и результаты анализа:").grid(row=5, column=0, padx=5, pady=5, sticky='w')
+        ttk.Label(frame, text="Статус и результаты анализа:").grid(row=3, column=0, padx=5, pady=5, sticky='w')
         self.status_text = tk.Text(frame, height=10, width=65, state=tk.DISABLED)
-        self.status_text.grid(row=6, column=0, columnspan=3, padx=5, pady=5)
+        self.status_text.grid(row=4, column=0, columnspan=3, padx=5, pady=5)
 
     def read_data(self, file_path):
         self.all_hashes = []
@@ -154,7 +140,7 @@ class App:
             self.log(f"Ошибка подготовки временных файлов: {e}")
             return False
 
-        mask = "?d" * PHONE_NUMBER_LENGTH
+        mask = "?d" * 11
 
         command = [
             hashcat_exe_path, 
@@ -227,64 +213,41 @@ class App:
 
     def run_full_decryption_process(self):
         self.log("--- Начало процесса деобезличивания ---")
-        self.update_progress(0)
-        self._last_output_rows = None
-        self.download_button.config(state=tk.DISABLED)
         input_path = self.input_file_path.get()
         
         if not self.read_data(input_path):
-            self.update_progress(0)
             return
-        self.update_progress(10)
 
         if not self.run_hashcat():
             self.salt_result_var.set("Ошибка Hashcat!")
             self._cleanup_temp_files()
-            self.update_progress(0)
             return
-        self.update_progress(60)
 
         cracked_numbers_by_hash = self.read_cracked_numbers()
         self._cleanup_temp_files()
         
         if not cracked_numbers_by_hash:
             self.salt_result_var.set("Результаты Hashcat пусты.")
-            self.update_progress(0)
             return
 
         # Обновленный вызов для получения соли и минимального числа пар
         final_salt, min_pairs = self.find_salt_and_analyze(cracked_numbers_by_hash)
-        self.update_progress(70)
 
         if final_salt is None:
             self.salt_result_var.set("Соль не найдена!")
-            self.update_progress(0)
             return
 
         self.salt_result_var.set(f"Соль найдена: {final_salt} (Мин. пар: {min_pairs})")
         
         decrypted_numbers = []
-        total_hashes = len(self.all_hashes)
-        last_progress = 70
         
         # Дешифровка номеров
-        for idx, hash_val in enumerate(self.all_hashes):
-            if total_hashes > 0:
-                progress = 70 + int(((idx + 1) / total_hashes) * 30)
-                if progress > last_progress and (
-                    progress - last_progress >= PROGRESS_UPDATE_INTERVAL or idx == total_hashes - 1
-                ):
-                    self.update_progress(progress)
-                    last_progress = progress
-
+        for hash_val in self.all_hashes:
             if hash_val in cracked_numbers_by_hash:
                 salted_num = cracked_numbers_by_hash[hash_val]
                 original = salted_num - final_salt
                 decrypted_numbers.append(original)
-            else:
-                decrypted_numbers.append(None)  
-        
-        self.update_progress(100)
+            
         self.save_result(decrypted_numbers)
 
     def _cleanup_temp_files(self):
@@ -299,27 +262,6 @@ class App:
             except Exception as e:
                 self.log(f"Ошибка при удалении выходного временного файла: {e}", field='decryption')
         self.log("Временные файлы Hashcat удалены.", field='decryption')
-
-    def download_last_result(self):
-        if not self._last_output_rows:
-            messagebox.showinfo("Нет данных", "Сначала выполните деобезличивание.")
-            return
-
-        output_path = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            initialfile="decrypted_phone_numbers_final.csv",
-            title="Сохранить расшифрованные номера"
-        )
-
-        if output_path:
-            try:
-                with open(output_path, 'w', newline='', encoding=ENCODING) as f:
-                    writer = csv.writer(f, delimiter=CSV_DELIMITER)
-                    writer.writerows(self._last_output_rows)
-                self.log(f"Номера сохранены в: {output_path}")
-            except Exception as e:
-                self.log(f"Ошибка сохранения файла: {e}")
-                messagebox.showerror("Ошибка", f"Ошибка сохранения файла: {e}")
 
     def find_salt_and_analyze(self, cracked_numbers_by_hash):
         # 1. Подготовка данных
@@ -392,23 +334,34 @@ class App:
         for i, data_row in enumerate(data_rows):
             new_row = list(data_row)
             
-            if i < len(decrypted_numbers) and decrypted_numbers[i] is not None:
+            if i < len(decrypted_numbers):
                 original_num = decrypted_numbers[i]
-                formatted_num = f"{original_num:0{PHONE_NUMBER_LENGTH}d}"
+                formatted_num = f"{original_num:011d}"
                 
                 if len(new_row) > 2:
                     new_row[2] = formatted_num
                 else:
                     new_row.extend([''] * (3 - len(new_row)))
                     new_row[2] = formatted_num
-            else:
-                if len(new_row) < 3:
-                    new_row.extend([''] * (3 - len(new_row)))  # keep column count consistent even without decryption
-            output_rows.append(new_row)
+                    
+                output_rows.append(new_row)
 
-        self._last_output_rows = output_rows
-        self.download_button.config(state=tk.NORMAL)
-        self.log("\nРасшифровка завершена! Нажмите 'Скачать деобезличенный отчет' для сохранения файла.")
+        output_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            initialfile="decrypted_phone_numbers_final.csv",
+            title="Сохранить расшифрованные номера"
+        )
+
+        if output_path:
+            try:
+                with open(output_path, 'w', newline='', encoding=ENCODING) as f:
+                    writer = csv.writer(f, delimiter=CSV_DELIMITER)
+                    writer.writerows(output_rows)
+                self.log(f"\nРасшифровка завершена! Номера сохранены в: {output_path}")
+                messagebox.showinfo("Готово", f"Расшифровка завершена! Номера сохранены в: {output_path}")
+            except Exception as e:
+                self.log(f"Ошибка сохранения файла: {e}")
+                messagebox.showerror("Ошибка", f"Ошибка сохранения файла: {e}")
 
     def _setup_encryption(self):
         frame = ttk.Frame(self.encryption_tab, padding="10")
@@ -418,24 +371,14 @@ class App:
         ttk.Entry(frame, textvariable=self.encryption_input_path, width=40).grid(row=0, column=1, padx=5, pady=5)
         ttk.Button(frame, text="Обзор", command=lambda: self.select_file(self.encryption_input_path)).grid(row=0, column=2, padx=5, pady=5)
         
-        ttk.Label(frame, text="Соль для числового сдвига (основной метод):").grid(row=1, column=0, padx=5, pady=5, sticky='w')
-        ttk.Entry(frame, textvariable=self.encryption_salt_var, width=20).grid(row=1, column=1, padx=5, pady=5, sticky='w')
-
-        ttk.Button(frame, text="Зашифровать 3 методами", command=self.run_encryption).grid(row=2, column=0, columnspan=3, pady=15)
+        ttk.Button(frame, text="Зашифровать 3 методами", command=self.run_encryption).grid(row=1, column=0, columnspan=3, pady=15)
         
         self.encryption_text = tk.Text(frame, height=10, width=65, state=tk.DISABLED)
-        self.encryption_text.grid(row=3, column=0, columnspan=3, padx=5, pady=5)
+        self.encryption_text.grid(row=2, column=0, columnspan=3, padx=5, pady=5)
 
     def run_encryption(self):
         self.log("--- Начало процесса шифрования ---", 'encryption')
         input_path = self.encryption_input_path.get()
-        salt_str = self.encryption_salt_var.get().strip()
-        
-        try:
-            numeric_salt = int(salt_str)
-        except ValueError:
-            messagebox.showerror("Ошибка", "Соль должна быть числом.")
-            return
         
         try:
             with open(input_path, 'r', encoding=ENCODING) as f:
@@ -458,7 +401,7 @@ class App:
                 original_numbers = []
                 for row in data_rows:
                     num_str = row[2].strip() if len(row) > 2 else ''
-                    if num_str.isdigit() and len(num_str) == PHONE_NUMBER_LENGTH:
+                    if num_str.isdigit() and len(num_str) == 11:
                         original_numbers.append(num_str)
                     else:
                         original_numbers.append('')
@@ -475,32 +418,30 @@ class App:
         if not save_directory:
             return
 
-        salt_a = numeric_salt
-        salt_b = numeric_salt + SALT_OFFSET_B
-        salt_c = numeric_salt + SALT_OFFSET_C
+        def method_a(num):
+            SALT = "MIA_HW_LAB_3"
+            return hashlib.md5(f"{num}{SALT}".encode()).hexdigest()
 
-        def build_salted_md5(salt_value):
-            def inner(num_str):
-                try:
-                    salted_num_int = int(num_str) + salt_value
-                    return hashlib.md5(str(salted_num_int).encode()).hexdigest()
-                except ValueError:
-                    return ""
-            return inner
-
-        method_a = build_salted_md5(salt_a)
-        method_b = build_salted_md5(salt_b)
-        method_c = build_salted_md5(salt_c)
+        def method_b(num):
+            return hashlib.sha256(num.encode()).hexdigest()
+            
+        random_salt = random.randint(1000000000, 9999999999) 
+        def method_c(num_str):
+            try:
+                num_int = int(num_str)
+                return f"{num_int + random_salt:011d}"
+            except ValueError:
+                return ""
         
         base_filename = os.path.basename(input_path).replace('.csv', '')
 
         methods = {
-            f"1_MD5_SaltA_{base_filename}.csv": (method_a, f"SHA-1 + числовая соль {salt_a}"),
-            f"2_MD5_SaltB_{base_filename}.csv": (method_b, f"MD5 + числовая соль {salt_b}"),
-            f"3_MD5_SaltC_{base_filename}.csv": (method_c, f"SHA-256 + числовая соль {salt_c}"),
+            f"1_MD5_Salted_{base_filename}.csv": (method_a, "MD5 + Строковая Соль"),
+            f"2_SHA256_{base_filename}.csv": (method_b, "SHA-256"),
+            f"3_NumericShift_Hashcat_{base_filename}.csv": (method_c, f"Числовой Сдвиг (+{random_salt}) (Взламывается Hashcat)"),
         }
 
-        self.log(f"Начало шифрования {len(data_rows)} номеров... Соль: {numeric_salt}", 'encryption')
+        self.log(f"Начало шифрования {len(data_rows)} номеров...", 'encryption')
 
         for filename, (func, description) in methods.items():
             try:

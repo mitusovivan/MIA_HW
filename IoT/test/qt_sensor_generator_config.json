@@ -1,0 +1,12 @@
+{
+  "neighborhood": {
+    "radius": 0.04,
+    "safe_center": 0.25,
+    "fire_center": 0.9,
+    "leak_center": 0.88,
+    "flood_center": 0.98
+  },
+  "stream": {
+    "interval_ms": 5000
+  }
+}
