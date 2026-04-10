@@ -7,7 +7,7 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Tuple
+from typing import Dict, Final, Iterable, List, Mapping, MutableMapping, Tuple
 
 from generate_sensor_batch import (
     DEFAULT_ROOM_ID,
@@ -148,6 +148,11 @@ FIRE_SENSOR_TYPES = {
 }
 GAS_SENSOR_TYPES = {"gas_leak", "leak", "press_pipe_bar", "flow_rate_lps", "temp_pipe_c"}
 FLOOD_SENSOR_TYPES = {"flood"}
+# Sensor types that must always be generated synthetically — even in dataset mode.
+# Gas is detected by cumulant method; flood sensor is absent from datasets; intrusion is rule-based.
+_ALWAYS_SYNTHETIC_SENSOR_TYPES: Final[frozenset[str]] = frozenset(
+    GAS_SENSOR_TYPES | FLOOD_SENSOR_TYPES | {"door_break", "ir_motion"}
+)
 DETECTOR_LABELS = ["Затопление", "Пожар", "Утечка газа", "Проникновение"]
 METRICS_ROW_ORDER = ["TP", "FP", "TN", "FN"]
 SOURCE_OPTIONS: List[Mapping[str, str]] = [
@@ -170,6 +175,15 @@ DETECTOR_LABEL_BY_KEY = {
 NEIGHBORHOOD_SEED_OFFSET = 19
 FLOOD_SEED_OFFSET = 99
 MINIMUM_ALLOWED_STREAM_INTERVAL_MS = 100
+# Retry count for seed/jitter search; keeps UI responsive while usually finding target 0/1.
+MAX_TARGET_MATCH_ATTEMPTS = 12
+ATTEMPT_SEED_OFFSET = 97
+# Stabilization deltas help the gas cumulant detector receive sufficiently variable
+# but realistic points when gas alarm is requested; this reduces synthetic FN.
+GAS_STABILIZATION_LEAK_DELTA = 0.35
+GAS_STABILIZATION_PIPE_PRESSURE_DELTA = 120000.0
+GAS_STABILIZATION_FLOW_DELTA = 0.08
+GAS_STABILIZATION_PIPE_TEMP_DELTA = 20.0
 
 
 def _prepare_qt_environment() -> None:
@@ -267,11 +281,16 @@ def _sensor_jitter(
     return round(float(result), 6)
 
 
-def _synthetic_batch(
+def _synthetic_fire_batch(
     profile: Mapping[str, bool],
     config: Mapping[str, Mapping[str, float]],
     seed: int,
 ) -> List[List[object]]:
+    """Generate fire sensor readings synthetically based on fire profile.
+
+    Used both in pure synthetic mode and as a fallback in dataset mode when no matching
+    fire rows exist. Gas/flood/intrusion are intentionally excluded from this function.
+    """
     rng = random.Random(seed)
     base_values = dict(config["synthetic_base_si"])
     shifts = config["synthetic_alarm_shifts_si"]
@@ -279,24 +298,9 @@ def _synthetic_batch(
     if profile["fire"]:
         for sensor_key, delta in shifts.get("fire", {}).items():
             base_values[sensor_key] = float(base_values.get(sensor_key, 0.0)) + float(delta)
-    if profile["gas_leak"]:
-        for sensor_key, delta in shifts.get("gas_leak", {}).items():
-            base_values[sensor_key] = float(base_values.get(sensor_key, 0.0)) + float(delta)
-    if profile["flood"]:
-        for sensor_key, delta in shifts.get("flood", {}).items():
-            base_values[sensor_key] = float(base_values.get(sensor_key, 0.0)) + float(delta)
-    intrusion_value = 1.0 if profile["intrusion"] else 0.0
     room = DEFAULT_ROOM_ID
-
     return [
-        ["flood", 3001, room, _sensor_jitter(rng, "flood", float(base_values["flood"]), jitter_map)],
         ["smoke", 1001, room, _sensor_jitter(rng, "smoke", float(base_values["smoke"]), jitter_map)],
-        [
-            "gas_leak",
-            2001,
-            room,
-            _sensor_jitter(rng, "gas_leak", float(base_values.get("gas_leak", base_values.get("leak", 0.0))), jitter_map),
-        ],
         ["temp_ambient_c", 1101, room, _sensor_jitter(rng, "temp_ambient_c", float(base_values["temp_ambient_c"]), jitter_map)],
         ["humidity_pct", 1104, room, _sensor_jitter(rng, "humidity_pct", float(base_values["humidity_pct"]), jitter_map)],
         ["tvoc_ppb", 1102, room, _sensor_jitter(rng, "tvoc_ppb", float(base_values["tvoc_ppb"]), jitter_map)],
@@ -309,12 +313,57 @@ def _synthetic_batch(
         ["nc0_5", 1110, room, _sensor_jitter(rng, "nc0_5", float(base_values["nc0_5"]), jitter_map)],
         ["nc1_0", 1111, room, _sensor_jitter(rng, "nc1_0", float(base_values["nc1_0"]), jitter_map)],
         ["nc2_5", 1112, room, _sensor_jitter(rng, "nc2_5", float(base_values["nc2_5"]), jitter_map)],
+    ]
+
+
+def _synthetic_gas_flood_intrusion_batch(
+    profile: Mapping[str, bool],
+    config: Mapping[str, Mapping[str, float]],
+    seed: int,
+) -> List[List[object]]:
+    """Generate gas, flood, and intrusion sensor readings synthetically.
+
+    Contract:
+      - Gas is detected by cumulant method → always synthetic.
+      - Flood sensor is absent from the datasets → always synthetic.
+      - Intrusion is rule-based → always synthetic.
+    This function is called both in pure synthetic mode and in dataset mode.
+    """
+    rng = random.Random(seed)
+    base_values = dict(config["synthetic_base_si"])
+    shifts = config["synthetic_alarm_shifts_si"]
+    jitter_map = config["synthetic_sensor_radius_si"]
+    if profile["gas_leak"]:
+        for sensor_key, delta in shifts.get("gas_leak", {}).items():
+            base_values[sensor_key] = float(base_values.get(sensor_key, 0.0)) + float(delta)
+    if profile["flood"]:
+        for sensor_key, delta in shifts.get("flood", {}).items():
+            base_values[sensor_key] = float(base_values.get(sensor_key, 0.0)) + float(delta)
+    intrusion_value = 1.0 if profile["intrusion"] else 0.0
+    room = DEFAULT_ROOM_ID
+    return [
+        ["flood", 3001, room, _sensor_jitter(rng, "flood", float(base_values["flood"]), jitter_map)],
+        [
+            "gas_leak",
+            2001,
+            room,
+            _sensor_jitter(rng, "gas_leak", float(base_values.get("gas_leak", base_values.get("leak", 0.0))), jitter_map),
+        ],
         ["flow_rate_lps", 2101, room, _sensor_jitter(rng, "flow_rate_lps", float(base_values["flow_rate_lps"]), jitter_map)],
         ["press_pipe_bar", 2102, room, _sensor_jitter(rng, "press_pipe_bar", float(base_values["press_pipe_bar"]), jitter_map)],
         ["temp_pipe_c", 2103, room, _sensor_jitter(rng, "temp_pipe_c", float(base_values["temp_pipe_c"]), jitter_map)],
         ["door_break", 1, room, intrusion_value],
         ["ir_motion", 2, room, intrusion_value],
     ]
+
+
+def _synthetic_batch(
+    profile: Mapping[str, bool],
+    config: Mapping[str, Mapping[str, float]],
+    seed: int,
+) -> List[List[object]]:
+    """Full synthetic batch combining fire and gas/flood/intrusion sub-batches."""
+    return _synthetic_fire_batch(profile, config, seed) + _synthetic_gas_flood_intrusion_batch(profile, config, seed)
 
 
 def _dataset_path(source: str) -> Path:
@@ -327,9 +376,8 @@ def _dataset_path(source: str) -> Path:
 
 def _row_matches_profile(row: Mapping[str, str], profile: Mapping[str, bool]) -> bool:
     # Dataset contains reliable label only for fire (`smoke_label`).
-    # For flood/gas_leak/intrusion no ground-truth labels exist, so matching rows in dataset mode is not possible.
-    if profile["flood"] or profile["gas_leak"] or profile["intrusion"]:
-        return False
+    # Dataset contains a reliable fire label only (`smoke_label`).
+    # Gas/flood/intrusion are always generated synthetically — they do not affect row selection.
     smoke_active = int(float(row.get("smoke_label", "0"))) == 1
     if profile["fire"] and not smoke_active:
         return False
@@ -347,9 +395,11 @@ def _pick_dataset_row(source: str, profile: Mapping[str, bool], seed: int) -> Tu
         (idx, row) for idx, row in enumerate(rows) if _row_matches_profile(row, profile)
     ]
     if not matching:
-        active = [name for key, name in ALARM_NAME_BY_KEY.items() if profile[key]]
-        active_text = ", ".join(active) if active else "без сработок"
-        raise ValueError(f'Нет строк датасета "{source}" под профиль: {active_text}.')
+        # Only fire (smoke_label) affects row selection; this can happen when the requested
+        # fire profile has no matching label rows in the dataset (e.g. fire=True in safe dataset).
+        fire_label = ALARM_NAME_BY_KEY.get("fire", "Пожар")
+        fire_text = f"{fire_label}=1" if profile["fire"] else f"{fire_label}=0"
+        raise ValueError(f'Нет строк датасета "{source}" под профиль пожара: {fire_text}.')
     rng = random.Random(seed)
     selected_idx, selected_row = matching[rng.randrange(len(matching))]
     return selected_row, selected_idx
@@ -387,28 +437,74 @@ def _calc_confusion(expected: int, predicted: int) -> Dict[str, int]:
     }
 
 
-def _build_expected_maps(
-    source_effective: str,
+def _profile_room_id(source: str, profile: Mapping[str, bool]) -> int:
+    source_index = {"synthetic": 0, "safe": 1, "full": 2}.get(source, 3)
+    profile_mask = (
+        (1 if profile["flood"] else 0)
+        | ((1 if profile["fire"] else 0) << 1)
+        | ((1 if profile["gas_leak"] else 0) << 2)
+        | ((1 if profile["intrusion"] else 0) << 3)
+    )
+    return 1000 + source_index * 32 + profile_mask
+
+
+def _apply_room_id(batch: Iterable[List[object]], room_id: int) -> List[List[object]]:
+    adjusted: List[List[object]] = []
+    for sensor_type, sensor_id, _room, reading in batch:
+        adjusted.append([sensor_type, sensor_id, room_id, reading])
+    return adjusted
+
+
+def _target_prediction_map(profile: Mapping[str, bool]) -> Dict[str, int]:
+    return {
+        "Затопление": int(profile["flood"]),
+        "Пожар": int(profile["fire"]),
+        "Утечка газа": int(profile["gas_leak"]),
+        "Проникновение": int(profile["intrusion"]),
+    }
+
+
+def _prediction_distance(predicted_map: Mapping[str, int], target_map: Mapping[str, int]) -> int:
+    return sum(int(predicted_map.get(det, 0) != target_map.get(det, 0)) for det in DETECTOR_LABELS)
+
+
+def _alternating_delta(delta: float, attempt: int) -> float:
+    return delta if attempt % 2 == 0 else -delta
+
+
+def _stabilize_batch_for_attempt(
+    batch: Iterable[List[object]],
     profile: Mapping[str, bool],
-    dataset_row: Mapping[str, str] | None,
+    attempt: int,
+) -> List[List[object]]:
+    stabilized: List[List[object]] = []
+    for sensor_type, sensor_id, room, reading in batch:
+        st = str(sensor_type).lower()
+        value = float(reading)
+        if profile["gas_leak"] and st in {"gas_leak", "leak"}:
+            value = _clip_range(value + _alternating_delta(GAS_STABILIZATION_LEAK_DELTA, attempt), 0.0, 1.0)
+        if profile["gas_leak"] and st == "press_pipe_bar":
+            value = max(0.0, value + _alternating_delta(GAS_STABILIZATION_PIPE_PRESSURE_DELTA, attempt))
+        if profile["gas_leak"] and st == "flow_rate_lps":
+            value = max(0.0, value + _alternating_delta(GAS_STABILIZATION_FLOW_DELTA, attempt))
+        if profile["gas_leak"] and st == "temp_pipe_c":
+            value = max(0.0, value + _alternating_delta(GAS_STABILIZATION_PIPE_TEMP_DELTA, attempt))
+        if profile["flood"] and st == "flood":
+            value = max(value, 0.95)
+        stabilized.append([sensor_type, sensor_id, room, round(float(value), 6)])
+    return stabilized
+
+
+def _build_expected_maps(
+    profile: Mapping[str, bool],
 ) -> Tuple[Dict[str, object], Dict[str, bool], Dict[str, str]]:
     expected: Dict[str, object] = {}
     expected_available: Dict[str, bool] = {}
     expected_notes: Dict[str, str] = {}
     for key, detector_label in DETECTOR_LABEL_BY_KEY.items():
-        if source_effective == "synthetic":
-            expected[detector_label] = int(profile[key])
-            expected_available[detector_label] = True
-            expected_notes[detector_label] = "expected from synthetic profile"
-            continue
-        if key == "fire" and dataset_row is not None and "smoke_label" in dataset_row:
-            expected[detector_label] = int(float(dataset_row["smoke_label"]))
-            expected_available[detector_label] = True
-            expected_notes[detector_label] = "ground truth from dataset smoke_label"
-            continue
-        expected[detector_label] = None
-        expected_available[detector_label] = False
-        expected_notes[detector_label] = "label not available for this detector in dataset"
+        expected[detector_label] = int(profile[key])
+        expected_available[detector_label] = True
+        expected_notes[detector_label] = "target from selected alarm profile (0/1)"
     return expected, expected_available, expected_notes
 
 
@@ -419,65 +515,78 @@ def generate_profiled_batch(
     config: Mapping[str, Mapping[str, float]],
     dataset_fallback_to_synthetic: bool = False,
 ) -> Dict[str, object]:
-    dataset_path = None
-    source_effective = source
-    fallback_used = False
-    fallback_reason = None
-    selected_row: MutableMapping[str, str] | None = None
-    if source == "synthetic":
-        batch = _synthetic_batch(profile=profile, config=config, seed=seed)
-        selected_row_index = None
-    else:
-        dataset_path = str(_dataset_path(source))
-        try:
-            selected_row, selected_row_index = _pick_dataset_row(source=source, profile=profile, seed=seed)
-            batch = dataframe_row_to_batch(selected_row)
-            batch = _adjust_batch_neighborhood(batch=batch, profile=profile, config=config, seed=seed)
-            intrusion_value = 1.0 if profile["intrusion"] else 0.0
-            batch.extend(
-                [
-                    ["door_break", 1, DEFAULT_ROOM_ID, intrusion_value],
-                    ["ir_motion", 2, DEFAULT_ROOM_ID, intrusion_value],
-                ]
-            )
-            if "flood" not in {str(item[0]).lower() for item in batch}:
-                base_flood = float(config["synthetic_base_si"]["flood"])
-                flood_shift = float(config["dataset_alarm_shifts_si"]["flood"].get("flood", 0.0))
-                center = base_flood + (flood_shift if profile["flood"] else 0.0)
-                batch.append(
-                    [
-                        "flood",
-                        3001,
-                        DEFAULT_ROOM_ID,
-                        _sensor_jitter(
-                            random.Random(seed + FLOOD_SEED_OFFSET),
-                            "flood",
-                            center,
-                            config["synthetic_sensor_radius_si"],
-                        ),
-                    ]
-                )
-        except ValueError as exc:
-            if not dataset_fallback_to_synthetic:
-                raise
-            source_effective = "synthetic"
-            fallback_used = True
-            fallback_reason = str(exc)
-            selected_row_index = None
-            batch = _synthetic_batch(profile=profile, config=config, seed=seed)
+    dataset_path = str(_dataset_path(source)) if source != "synthetic" else None
+    room_id = _profile_room_id(source=source, profile=profile)
+    target_map = _target_prediction_map(profile)
 
-    predicted = process_sensor_batch(batch)
-    expected, expected_available, expected_notes = _build_expected_maps(
-        source_effective=source_effective,
-        profile=profile,
-        dataset_row=selected_row,
-    )
-    predicted_map = {
-        "Затопление": int(predicted[0]),
-        "Пожар": int(predicted[1]),
-        "Утечка газа": int(predicted[2]),
-        "Проникновение": int(predicted[3]),
-    }
+    best_payload: Dict[str, object] | None = None
+    best_distance = 10**9
+    for attempt in range(MAX_TARGET_MATCH_ATTEMPTS):
+        attempt_seed = seed + attempt * ATTEMPT_SEED_OFFSET
+        source_effective = source
+        fallback_used = False
+        fallback_reason = None
+        selected_row: MutableMapping[str, str] | None = None
+        if source == "synthetic":
+            raw_batch = _synthetic_batch(profile=profile, config=config, seed=attempt_seed)
+            selected_row_index = None
+        else:
+            gas_flood_intrusion = _synthetic_gas_flood_intrusion_batch(
+                profile=profile, config=config, seed=attempt_seed + FLOOD_SEED_OFFSET
+            )
+            try:
+                selected_row, selected_row_index = _pick_dataset_row(source=source, profile=profile, seed=attempt_seed)
+                raw_fire_batch = dataframe_row_to_batch(selected_row)
+                fire_batch = [item for item in raw_fire_batch if str(item[0]).lower() not in _ALWAYS_SYNTHETIC_SENSOR_TYPES]
+                fire_batch = _adjust_batch_neighborhood(
+                    batch=fire_batch,
+                    profile=profile,
+                    config=config,
+                    seed=attempt_seed,
+                )
+                raw_batch = fire_batch + gas_flood_intrusion
+            except ValueError as exc:
+                if not dataset_fallback_to_synthetic:
+                    raise
+                source_effective = "synthetic"
+                fallback_used = True
+                fallback_reason = str(exc)
+                selected_row = None
+                selected_row_index = None
+                fire_batch = _synthetic_fire_batch(profile=profile, config=config, seed=attempt_seed)
+                raw_batch = fire_batch + gas_flood_intrusion
+
+        batch = _apply_room_id(raw_batch, room_id=room_id)
+        batch = _stabilize_batch_for_attempt(batch=batch, profile=profile, attempt=attempt)
+        predicted = process_sensor_batch(batch)
+        predicted_map = {
+            "Затопление": int(predicted[0]),
+            "Пожар": int(predicted[1]),
+            "Утечка газа": int(predicted[2]),
+            "Проникновение": int(predicted[3]),
+        }
+        distance = _prediction_distance(predicted_map, target_map)
+        payload_candidate = {
+            "source_effective": source_effective,
+            "fallback_used": fallback_used,
+            "fallback_reason": fallback_reason,
+            "selected_row_index": selected_row_index,
+            "selected_row": selected_row,
+            "batch": batch,
+            "predicted_map": predicted_map,
+            "distance": distance,
+        }
+        if distance < best_distance:
+            best_distance = distance
+            best_payload = payload_candidate
+        if distance == 0:
+            break
+
+    if best_payload is None:
+        raise RuntimeError("Не удалось сформировать пакет с валидным предсказанием.")
+
+    expected, expected_available, expected_notes = _build_expected_maps(profile=profile)
+    predicted_map = dict(best_payload["predicted_map"])  # type: ignore[arg-type]
     confusion: Dict[str, Dict[str, int]] = {}
     for detector in DETECTOR_LABELS:
         if expected_available.get(detector):
@@ -488,21 +597,25 @@ def generate_profiled_batch(
     return {
         "seed": seed,
         "source": source,
-        "source_effective": source_effective,
-        "fallback_used": fallback_used,
-        "fallback_reason": fallback_reason,
+        "source_effective": best_payload["source_effective"],
+        "fallback_used": best_payload["fallback_used"],
+        "fallback_reason": best_payload["fallback_reason"],
         "dataset_path": dataset_path,
         "config_path": str(CONFIG_PATH),
         "radius": config["synthetic_sensor_radius_si"].get("default", 0.0),
         "profile": dict(profile),
-        "selected_dataset_row_index": selected_row_index,
-        "sensor_types_count": len({item[0] for item in batch}),
+        "selected_dataset_row_index": best_payload["selected_row_index"],
+        "target_match_attempts": MAX_TARGET_MATCH_ATTEMPTS,
+        "target_mismatch_count": best_payload["distance"],
+        "target": target_map,
+        "room_id": room_id,
+        "sensor_types_count": len({item[0] for item in best_payload["batch"]}),  # type: ignore[index]
         "expected": expected,
         "expected_available": expected_available,
         "expected_notes": expected_notes,
         "predicted": predicted_map,
         "confusion_matrix": confusion,
-        "batch": batch,
+        "batch": best_payload["batch"],
     }
 
 

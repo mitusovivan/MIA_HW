@@ -94,10 +94,6 @@ GAS_SENSOR_TYPES = {
     "press_pipe_bar",
     "flow_rate_lps",
     "temp_pipe_c",
-    "tvoc_ppb",
-    "eco2_ppm",
-    "raw_h2",
-    "raw_ethanol",
 }
 FLOOD_SENSOR_TYPES = {
     "flood",
@@ -345,14 +341,6 @@ def _room_signal_updates_for_gas_leak(packets: List[SensorPacket]) -> Dict[str, 
             continue
         if sensor_key in {"gas_leak", "leak", "water_leak"}:
             score = float(packet.reading)
-        elif sensor_key == "tvoc_ppb":
-            score = float(packet.reading) / 1500.0
-        elif sensor_key == "eco2_ppm":
-            score = float(packet.reading) / 3000.0
-        elif sensor_key == "raw_h2":
-            score = float(packet.reading) / 25000.0
-        elif sensor_key == "raw_ethanol":
-            score = float(packet.reading) / 30000.0
         elif sensor_key == "press_pipe_bar":
             score = float(packet.reading) / 500000.0
         elif sensor_key == "flow_rate_lps":
