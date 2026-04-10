@@ -38,29 +38,16 @@ def _r(rng: random.Random, lo: float, hi: float) -> float:
     return round(rng.uniform(lo, hi), 4)
 
 
-def _normalize_reading(value: float, col: str) -> float:
-    scales = {
-        "temp_ambient_c": 80.0,
-        "humidity_pct": 100.0,
-        "tvoc_ppb": 1200.0,
-        "eco2_ppm": 2000.0,
-        "raw_h2": 20000.0,
-        "raw_ethanol": 25000.0,
-        "press_ambient_bar": 2.0,
-        "pm1_0": 15.0,
-        "pm2_5": 20.0,
-        "nc0_5": 120.0,
-        "nc1_0": 20.0,
-        "nc2_5": 2.0,
-        "press_pipe_bar": 5.0,
-        "flow_rate_lps": 250.0,
-        "temp_pipe_c": 80.0,
-    }
-    scale = scales.get(col, 1.0)
-    if scale == 0:
-        return 0.0
-    normalized = float(value) / scale
-    return max(0.0, min(1.5, round(normalized, 4)))
+def _to_si_value(value: float, col: str) -> float:
+    if col in ("temp_ambient_c", "temp_pipe_c"):
+        return round(float(value) + 273.15, 4)  # C -> K
+    if col == "humidity_pct":
+        return round(float(value) / 100.0, 6)  # % -> fraction
+    if col in ("press_ambient_bar", "press_pipe_bar"):
+        return round(float(value) * 100000.0, 4)  # bar -> Pa
+    if col == "flow_rate_lps":
+        return round(float(value) * 0.001, 6)  # L/s -> m^3/s
+    return round(float(value), 6)
 
 
 def dataframe_row_to_batch(row: Mapping[str, object], room: int = DEFAULT_ROOM_ID) -> List[SensorVector]:
@@ -76,7 +63,7 @@ def dataframe_row_to_batch(row: Mapping[str, object], room: int = DEFAULT_ROOM_I
             value = float(raw_value)
         except (TypeError, ValueError):
             continue
-        batch.append([col, sensor_id, room, _normalize_reading(value, col)])
+        batch.append([col, sensor_id, room, _to_si_value(value, col)])
         sensor_id += 1
     return batch
 
@@ -109,26 +96,46 @@ def generate_synthetic_batch(target_alarm: int, seed: int) -> List[SensorVector]
     if target_alarm == 1:
         return [
             ["flood", 3001, room, _r(rng, 0.92, 1.25)],
-            ["smoke", 1001, room, _r(rng, 0.72, 1.10)],
-            ["leak", 2001, room, _r(rng, 0.72, 1.10)],
-            ["temp_ambient_c", 1101, room, _r(rng, 0.75, 1.05)],
-            ["tvoc_ppb", 1102, room, _r(rng, 0.75, 1.10)],
-            ["eco2_ppm", 1103, room, _r(rng, 0.72, 1.00)],
-            ["flow_rate_lps", 2101, room, _r(rng, 0.80, 1.10)],
-            ["press_pipe_bar", 2102, room, _r(rng, 0.72, 1.00)],
+            ["smoke", 1001, room, _r(rng, 0.8, 1.0)],
+            ["gas_leak", 2001, room, _r(rng, 0.8, 1.0)],
+            ["temp_ambient_c", 1101, room, _r(rng, 335.0, 365.0)],  # K
+            ["humidity_pct", 1104, room, _r(rng, 0.60, 0.95)],  # fraction
+            ["tvoc_ppb", 1102, room, _r(rng, 300.0, 1200.0)],
+            ["eco2_ppm", 1103, room, _r(rng, 1000.0, 2500.0)],
+            ["raw_h2", 1105, room, _r(rng, 14000.0, 21000.0)],
+            ["raw_ethanol", 1106, room, _r(rng, 22000.0, 28000.0)],
+            ["press_ambient_bar", 1107, room, _r(rng, 93000.0, 98000.0)],  # Pa
+            ["pm1_0", 1108, room, _r(rng, 8.0, 20.0)],
+            ["pm2_5", 1109, room, _r(rng, 10.0, 25.0)],
+            ["nc0_5", 1110, room, _r(rng, 40.0, 130.0)],
+            ["nc1_0", 1111, room, _r(rng, 6.0, 25.0)],
+            ["nc2_5", 1112, room, _r(rng, 0.2, 3.0)],
+            ["flow_rate_lps", 2101, room, _r(rng, 0.18, 0.30)],  # m^3/s
+            ["press_pipe_bar", 2102, room, _r(rng, 350000.0, 500000.0)],  # Pa
+            ["temp_pipe_c", 2103, room, _r(rng, 330.0, 380.0)],  # K
             ["door_break", 1, room, 1.0],
             ["ir_motion", 2, room, 1.0],
         ]
 
     return [
-        ["flood", 3001, room, _r(rng, 0.01, 0.89)],
-        ["smoke", 1001, room, _r(rng, 0.01, 0.69)],
-        ["leak", 2001, room, _r(rng, 0.01, 0.69)],
-        ["temp_ambient_c", 1101, room, _r(rng, 0.05, 0.68)],
-        ["tvoc_ppb", 1102, room, _r(rng, 0.05, 0.65)],
-        ["eco2_ppm", 1103, room, _r(rng, 0.05, 0.60)],
-        ["flow_rate_lps", 2101, room, _r(rng, 0.05, 0.68)],
-        ["press_pipe_bar", 2102, room, _r(rng, 0.05, 0.60)],
+            ["flood", 3001, room, _r(rng, 0.01, 0.89)],
+            ["smoke", 1001, room, _r(rng, 0.0, 0.2)],
+            ["gas_leak", 2001, room, _r(rng, 0.0, 0.2)],
+        ["temp_ambient_c", 1101, room, _r(rng, 292.0, 302.0)],  # K
+        ["humidity_pct", 1104, room, _r(rng, 0.35, 0.60)],  # fraction
+        ["tvoc_ppb", 1102, room, _r(rng, 5.0, 80.0)],
+        ["eco2_ppm", 1103, room, _r(rng, 380.0, 800.0)],
+        ["raw_h2", 1105, room, _r(rng, 12000.0, 13500.0)],
+        ["raw_ethanol", 1106, room, _r(rng, 19000.0, 21500.0)],
+        ["press_ambient_bar", 1107, room, _r(rng, 93000.0, 95000.0)],  # Pa
+        ["pm1_0", 1108, room, _r(rng, 0.5, 3.0)],
+        ["pm2_5", 1109, room, _r(rng, 0.5, 4.0)],
+        ["nc0_5", 1110, room, _r(rng, 5.0, 18.0)],
+        ["nc1_0", 1111, room, _r(rng, 0.8, 3.0)],
+        ["nc2_5", 1112, room, _r(rng, 0.01, 0.08)],
+        ["flow_rate_lps", 2101, room, _r(rng, 0.05, 0.12)],  # m^3/s
+        ["press_pipe_bar", 2102, room, _r(rng, 200000.0, 320000.0)],  # Pa
+        ["temp_pipe_c", 2103, room, _r(rng, 290.0, 310.0)],  # K
         ["door_break", 1, room, 0.0],
         ["ir_motion", 2, room, 0.0],
     ]

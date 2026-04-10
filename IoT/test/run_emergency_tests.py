@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
-import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -11,21 +9,16 @@ from typing import Dict, List
 from generate_sensor_batch import dataframe_row_to_batch, generate_batch
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-EMERGENCY_SYSTEM_PATH = BASE_DIR / "emergency_system.py"
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+from emergency_system import process_sensor_batch, reset_state  # type: ignore[import-not-found]
+
 UNIFIED_DATASET_PATH = BASE_DIR / "test" / "unified_test_clean.csv"
 SAFE_DATASET_PATH = BASE_DIR / "test" / "safe_unified_test_clean.csv"
 
 
 def run_emergency_system(batch: List[List[object]]) -> List[int]:
-    proc = subprocess.run(
-        [sys.executable, str(EMERGENCY_SYSTEM_PATH)],
-        input=json.dumps(batch, ensure_ascii=False),
-        text=True,
-        capture_output=True,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
-    return json.loads(proc.stdout.strip())
+    return process_sensor_batch(batch)
 
 
 def dataset_path(dataset: str) -> Path:
@@ -37,19 +30,19 @@ def dataset_path(dataset: str) -> Path:
 
 
 def evaluate_dataset(dataset: str, limit: int) -> None:
+    reset_state()
     path = dataset_path(dataset)
     with path.open("r", encoding="utf-8", newline="") as fh:
         rows = list(csv.DictReader(fh))
 
     if not rows:
         raise ValueError("Dataset is empty")
-    if "smoke_label" not in rows[0] or "leak_label" not in rows[0]:
-        raise ValueError("Dataset must contain smoke_label and leak_label")
+    if "smoke_label" not in rows[0]:
+        raise ValueError("Dataset must contain smoke_label")
     if limit > 0:
         rows = rows[:limit]
 
     fire_hits = 0
-    leak_hits = 0
     for row in rows:
         batch = dataframe_row_to_batch(row)
         batch.extend(
@@ -60,24 +53,25 @@ def evaluate_dataset(dataset: str, limit: int) -> None:
         )
         result = run_emergency_system(batch)
         fire_hits += int(result[1] == int(float(row["smoke_label"])))
-        leak_hits += int(result[2] == int(float(row["leak_label"])))
 
     total = len(rows)
     print(f"Dataset: {dataset}, rows: {total}")
     print(f"Fire label match: {fire_hits}/{total} ({fire_hits / total:.3f})")
-    print(f"Leak label match: {leak_hits}/{total} ({leak_hits / total:.3f})")
+    print("Затопление/Утечка газа/Проникновение: отсутствуют ground-truth метки в датасете, строгая оценка пропущена.")
 
 
 def evaluate_generator() -> None:
+    reset_state()
     alarm_batch = generate_batch(target_alarm=1, seed=123456, source="synthetic")
     normal_batch = generate_batch(target_alarm=0, seed=123457, source="synthetic")
-    alarm_result = run_emergency_system(alarm_batch)
     normal_result = run_emergency_system(normal_batch)
-    print(f"Synthetic alarm batch result: {alarm_result}")
+    alarm_result = run_emergency_system(alarm_batch)
     print(f"Synthetic normal batch result: {normal_result}")
+    print(f"Synthetic alarm batch result: {alarm_result}")
 
 
 def evaluate_intrusion_apartment() -> None:
+    reset_state()
     base_batch = [
         ["ir_motion", 11, "living_room", 0.0],
         ["ir_motion", 12, "living_room", 0.0],
@@ -114,29 +108,34 @@ def evaluate_intrusion_apartment() -> None:
 
 
 def evaluate_gas_leak_scenario() -> None:
-    normal_batch = [
-        ["tvoc_ppb", 501, 101, 0.2],
-        ["eco2_ppm", 502, 101, 0.2],
-        ["smoke", 503, 101, 0.2],
+    reset_state()
+    baseline_batch = [
+        ["gas_leak", 500, 101, 0.05],
+        ["tvoc_ppb", 501, 101, 40.0],
+        ["eco2_ppm", 502, 101, 550.0],
+        ["raw_h2", 503, 101, 12700.0],
+        ["raw_ethanol", 504, 101, 20600.0],
         ["door_break", 1, 101, 0.0],
         ["ir_motion", 2, 101, 0.0],
     ]
     gas_leak_batch = [
-        ["tvoc_ppb", 501, 101, 0.95],
-        ["eco2_ppm", 502, 101, 0.9],
-        ["smoke", 503, 101, 0.92],
+        ["gas_leak", 500, 101, 0.95],
+        ["tvoc_ppb", 501, 101, 1200.0],
+        ["eco2_ppm", 502, 101, 2600.0],
+        ["raw_h2", 503, 101, 22000.0],
+        ["raw_ethanol", 504, 101, 28000.0],
         ["door_break", 1, 101, 0.0],
         ["ir_motion", 2, 101, 0.0],
     ]
 
-    normal_result = run_emergency_system(normal_batch)
-    gas_result = run_emergency_system(gas_leak_batch)
-    if normal_result[1] != 0:
-        raise RuntimeError(f"Expected no gas/fire alarm for normal gas scenario, got: {normal_result}")
-    if gas_result[1] != 1:
-        raise RuntimeError(f"Expected gas/fire alarm for gas leak scenario, got: {gas_result}")
-    print(f"Gas leak baseline result: {normal_result}")
-    print(f"Gas leak alarm result: {gas_result}")
+    baseline_result = run_emergency_system(baseline_batch)
+    leak_result = run_emergency_system(gas_leak_batch)
+    if baseline_result[2] != 0:
+        raise RuntimeError(f"Expected no gas leak alarm for baseline gas scenario, got: {baseline_result}")
+    if leak_result[2] != 1:
+        raise RuntimeError(f"Expected gas leak alarm for gas leak scenario, got: {leak_result}")
+    print(f"Gas leak baseline result: {baseline_result}")
+    print(f"Gas leak alarm result: {leak_result}")
 
 
 def main() -> None:

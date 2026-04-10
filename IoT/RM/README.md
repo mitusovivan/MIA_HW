@@ -7,14 +7,14 @@
 
 Программа принимает пакет показаний датчиков и параллельно запускает 4 проверки:
 
-1. `detect_flood_threshold` (флаг наводнения/затопления)
-2. `detect_fire` (флаг пожара)
-3. `detect_water_leak` (флаг утечки воды)
+1. `detect_flood` (флаг наводнения/затопления, ML-интерфейс + fallback на threshold)
+2. `detect_fire` (флаг пожара, ML-модель `models/smoke_model.pkl`)
+3. `detect_gas_leak` (флаг утечки газа, кумулянтный метод + fallback ML/threshold)
 4. `detect_intrusion_alarm` (флаг вторжения)
 
 На выходе формируется вектор из 4 позиций:
 
-`[flood_alarm, fire_alarm, leak_alarm, intrusion_alarm]`
+`[flood_alarm, fire_alarm, gas_leak_alarm, intrusion_alarm]`
 
 - `1` — авария
 - `0` — всё в норме
@@ -41,6 +41,7 @@
 
 ```bash
 cd Code
+pip install -r requirements.txt
 python3 emergency_system.py << 'JSON'
 [
   ["flood", 1, 101, 0.95],
@@ -102,7 +103,7 @@ python3 test/run_emergency_tests.py --dataset full --limit 1000
 - запускает `emergency_system.py` как основную программу;
 - проверяет synthetic-генератор;
 - проверяет сценарий проникновения (квартира: гостиная/спальня/коридор/кухня, 2 motion-датчика в каждой комнате + входная дверь);
-- проверяет сценарий утечки газа (рост `tvoc_ppb`/`eco2_ppm`/`smoke`);
+- проверяет сценарий утечки газа;
 - проверяет датасеты `safe_unified_test_clean.csv` и `unified_test_clean.csv`.
 
 ## Qt GUI генератор
@@ -116,11 +117,11 @@ python3 test/qt_sensor_generator.py
 
 GUI умеет:
 - работать в потоковом режиме (`Старт`/`Стоп`) с постоянным обновлением данных и кнопкой `Обнулить`;
-- сдвигать окрестность в alarm-зону по 4 галочкам: `Пожар`, `Затопление`, `Утечка Газа`, `Проникновение`;
+- сдвигать окрестность в alarm-зону по 4 галочкам: `Пожар`, `Затопление`, `Утечка газа`, `Проникновение`;
 - брать seed автоматически как текущее время в секундах через `time.time()` (поле seed в GUI скрыто);
-- в режиме `safe/full` подтягивать строки датасета под выбранные сработки (`smoke_label`/`leak_label`);
+- в режиме `safe/full` подтягивать строки датасета по доступной метке `smoke_label`; для недоступных меток (flood/gas/intrusion) может использоваться synthetic fallback;
 - показывать в интерфейсе подтверждение чтения CSV (`источник`, `индекс строки`, `путь файла`);
-- брать параметры окрестности из `Code/test/qt_sensor_generator_config.json`;
+- брать параметры генерации/смещений из `Code/test/qt_sensor_generator_config.json` в **SI**;
 - показывать confusion-таблицу (True/False Positive/Negative) по 4 детекторам и сохранять JSON-пакет.
 
 Если на Windows возникает ошибка про `QT platform plugin`:
@@ -138,10 +139,10 @@ GUI умеет:
 
 - **Наводнение/затопление**: `flood`, `water_level`, `waterlevel`, `rain`, `drain`, код `300`
 - **Пожар/дым**: `fire`, `smoke`, `temperature`, `temp`, `co2`, `tvoc`, `eco2`, код `100`, а также поля `temp_ambient_c`, `humidity_pct`, `tvoc_ppb`, `eco2_ppm`, `raw_h2`, `raw_ethanol`, `press_ambient_bar`, `pm1_0`, `pm2_5`, `nc0_5`, `nc1_0`, `nc2_5`
-- **Утечка воды**: `leak`, `water_leak`, `pipe_pressure`, `flow`, `flow_rate`, код `200`, а также `press_pipe_bar`, `flow_rate_lps`, `temp_pipe_c`
+- **Утечка газа**: `gas_leak`, `leak`, `water_leak` (алиас), `tvoc_ppb`, `eco2_ppm`, `raw_h2`, `raw_ethanol`, `press_pipe_bar`, `flow_rate_lps`, `temp_pipe_c`
 - **Вторжение**: `ir_motion` (0), `door_break` (1), `window_open` (2), а также числовые `0/1/2`
 
-### Поля тестового датасета (дым/затопление/утечка)
+### Поля тестового датасета (дым + инженерные сенсоры)
 
 - `index`
 - `timestamp`
@@ -167,8 +168,8 @@ GUI умеет:
 
 - **Пожар/дым (`fire_test`)**:  
   `temp_ambient_c`, `humidity_pct`, `tvoc_ppb`, `eco2_ppm`, `raw_h2`, `raw_ethanol`, `press_ambient_bar`, `pm1_0`, `pm2_5`, `nc0_5`, `nc1_0`, `nc2_5`, целевая метка `smoke_label`.
-- **Утечка воды (`water_test`)**:  
-  `press_pipe_bar`, `flow_rate_lps`, `temp_pipe_c`, целевая метка `leak_label`.
+- **Утечка газа (`detect_gas_leak`)**:  
+  кумулянты 2..6 по истории газового сигнала; при недостатке истории возвращается 0, далее fallback на ML/threshold.
 - **Наводнение (`detect_flood_threshold`)**:  
   используется потоковый показатель уровня/факта воды в `reading` (в оркестраторе), без привязки к фиксированному CSV-столбцу.
 - **Вторжение (`intrusion_detection`)**:  
@@ -177,6 +178,20 @@ GUI умеет:
 ## Замечания
 
 - Выполнение 4 подсистем происходит параллельно через `ThreadPoolExecutor`.
+- Для `detect_fire` и `detect_flood` используется ML-инференс с rolling-window агрегацией (`window_size=5`) по in-memory истории последних пакетов на комнату.
+- Внешний контракт `process_sensor_batch` принимает **физические значения в SI** (за исключением оговорённых сенсоров концентраций и flood-уровня):
+  - `temp_ambient_c`, `temp_pipe_c`: **K** (Кельвины)
+  - `humidity_pct`: **доля 0..1**
+  - `press_ambient_bar`, `press_pipe_bar`: **Pa**
+  - `flow_rate_lps`: **м³/с**
+  - `tvoc_ppb`: **ppb**, `eco2_ppm`: **ppm** (как исходные сенсоры)
+  - `pm1_0`, `pm2_5`, `nc*`: как в датасете
+  - `flood`: нормализованный `flood_level_norm` в диапазоне `0..1`
+- Перед ML-инференсом значения автоматически приводятся к единицам, в которых обучались модели:
+  - fire-модель: `Temperature[C]`, `Humidity[%]`, `Pressure[hPa]` и т.д.
+- Если `joblib`/`pandas`/`scikit-learn` недоступны или `.pkl` отсутствует, для fire/flood включается fallback на пороги.
+- В датасетах для текущей оценки используется только `smoke_label`; для flood/gas/intrusion отсутствуют валидные ground-truth метки, поэтому их dataset-метрики в GUI/скриптах помечаются как недоступные.
+- При несовпадении версий sklearn для `.pkl` выводится одно агрегированное предупреждение (один раз), с рекомендацией установить `scikit-learn==1.8.0`.
 - Для подсистемы intrusion используются правила из `intrusion_detection.py`.
 - Для intrusion учитываются только сработавшие датчики (`reading > 0`).
 - Поддерживаемые intrusion-типы: `ir_motion`, `door_break`, `window_open` и числовые `0/1/2`.

@@ -24,12 +24,110 @@ from emergency_system import process_sensor_batch  # type: ignore[import-not-fou
 
 CONFIG_PATH = CURRENT_DIR / "qt_sensor_generator_config.json"
 DEFAULT_CONFIG: Dict[str, Dict[str, float]] = {
-    "neighborhood": {
-        "radius": 0.04,
-        "safe_center": 0.25,
-        "fire_center": 0.9,
-        "leak_center": 0.88,
-        "flood_center": 0.98,
+    "synthetic_base_si": {
+        "flood": 0.2,
+        "smoke": 0.1,
+        "leak": 0.1,
+        "temp_ambient_c": 296.15,
+        "humidity_pct": 0.45,
+        "tvoc_ppb": 40.0,
+        "eco2_ppm": 520.0,
+        "raw_h2": 12800.0,
+        "raw_ethanol": 20700.0,
+        "press_ambient_bar": 93800.0,
+        "pm1_0": 2.0,
+        "pm2_5": 2.5,
+        "nc0_5": 14.0,
+        "nc1_0": 2.2,
+        "nc2_5": 0.05,
+        "flow_rate_lps": 0.09,
+        "press_pipe_bar": 260000.0,
+        "temp_pipe_c": 298.15,
+    },
+    "synthetic_alarm_shifts_si": {
+        "flood": {"flood": 0.75},
+        "fire": {
+            "smoke": 0.8,
+            "temp_ambient_c": 55.0,
+            "humidity_pct": 0.35,
+            "tvoc_ppb": 700.0,
+            "eco2_ppm": 1200.0,
+            "raw_h2": 7000.0,
+            "raw_ethanol": 6500.0,
+            "pm1_0": 12.0,
+            "pm2_5": 13.0,
+            "nc0_5": 70.0,
+            "nc1_0": 12.0,
+            "nc2_5": 1.0,
+        },
+        "gas_leak": {
+            "leak": 0.85,
+            "flow_rate_lps": 0.14,
+            "press_pipe_bar": 170000.0,
+            "temp_pipe_c": 45.0,
+        },
+    },
+    "synthetic_sensor_radius_si": {
+        "default": 0.0,
+        "flood": 0.05,
+        "smoke": 0.03,
+        "leak": 0.04,
+        "temp_ambient_c": 4.0,
+        "humidity_pct": 0.05,
+        "tvoc_ppb": 45.0,
+        "eco2_ppm": 80.0,
+        "raw_h2": 300.0,
+        "raw_ethanol": 350.0,
+        "press_ambient_bar": 120.0,
+        "pm1_0": 0.4,
+        "pm2_5": 0.5,
+        "nc0_5": 1.5,
+        "nc1_0": 0.25,
+        "nc2_5": 0.01,
+        "flow_rate_lps": 0.01,
+        "press_pipe_bar": 8000.0,
+        "temp_pipe_c": 2.0,
+    },
+    "dataset_jitter_si": {
+        "default": 0.0,
+        "temp_ambient_c": 0.8,
+        "humidity_pct": 0.01,
+        "tvoc_ppb": 8.0,
+        "eco2_ppm": 12.0,
+        "raw_h2": 50.0,
+        "raw_ethanol": 60.0,
+        "press_ambient_bar": 60.0,
+        "pm1_0": 0.2,
+        "pm2_5": 0.2,
+        "nc0_5": 0.7,
+        "nc1_0": 0.1,
+        "nc2_5": 0.005,
+        "flow_rate_lps": 0.002,
+        "press_pipe_bar": 5000.0,
+        "temp_pipe_c": 0.8,
+    },
+    "dataset_alarm_shifts_si": {
+        "fire": {
+            "smoke": 0.75,
+            "temp_ambient_c": 22.0,
+            "humidity_pct": 0.20,
+            "tvoc_ppb": 280.0,
+            "eco2_ppm": 450.0,
+            "raw_h2": 1800.0,
+            "raw_ethanol": 1800.0,
+            "pm1_0": 3.0,
+            "pm2_5": 4.0,
+            "nc0_5": 15.0,
+            "nc1_0": 2.0,
+            "nc2_5": 0.08,
+        },
+        "gas_leak": {
+            "leak": 0.75,
+            "flow_rate_lps": 0.10,
+            "press_pipe_bar": 90000.0,
+            "temp_pipe_c": 28.0,
+        },
+        "flood": {"flood": 0.65},
     },
     "stream": {"interval_ms": 5000.0},
 }
@@ -48,9 +146,9 @@ FIRE_SENSOR_TYPES = {
     "nc1_0",
     "nc2_5",
 }
-LEAK_SENSOR_TYPES = {"leak", "press_pipe_bar", "flow_rate_lps", "temp_pipe_c"}
+GAS_SENSOR_TYPES = {"gas_leak", "leak", "press_pipe_bar", "flow_rate_lps", "temp_pipe_c"}
 FLOOD_SENSOR_TYPES = {"flood"}
-DETECTOR_LABELS = ["Затопление", "Пожар", "Утечка Газа", "Проникновение"]
+DETECTOR_LABELS = ["Затопление", "Пожар", "Утечка газа", "Проникновение"]
 METRICS_ROW_ORDER = ["TP", "FP", "TN", "FN"]
 SOURCE_OPTIONS: List[Mapping[str, str]] = [
     {"label": "Синтетический", "key": "synthetic"},
@@ -60,7 +158,13 @@ SOURCE_OPTIONS: List[Mapping[str, str]] = [
 ALARM_NAME_BY_KEY = {
     "fire": "Пожар",
     "flood": "Затопление",
-    "gas_leak": "Утечка Газа",
+    "gas_leak": "Утечка газа",
+    "intrusion": "Проникновение",
+}
+DETECTOR_LABEL_BY_KEY = {
+    "flood": "Затопление",
+    "fire": "Пожар",
+    "gas_leak": "Утечка газа",
     "intrusion": "Проникновение",
 }
 NEIGHBORHOOD_SEED_OFFSET = 19
@@ -112,12 +216,29 @@ def _load_config() -> Dict[str, Dict[str, float]]:
         loaded = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception:
         return config
-    neighborhood = loaded.get("neighborhood", {})
-    if isinstance(neighborhood, dict):
-        for key in ("radius", "safe_center", "fire_center", "leak_center", "flood_center"):
-            value = neighborhood.get(key)
-            if isinstance(value, (int, float)):
-                config["neighborhood"][key] = float(value)
+    for section in (
+        "synthetic_base_si",
+        "synthetic_sensor_radius_si",
+        "dataset_jitter_si",
+    ):
+        loaded_section = loaded.get(section, {})
+        if isinstance(loaded_section, dict):
+            for key, value in loaded_section.items():
+                if isinstance(value, (int, float)):
+                    config[section][key] = float(value)
+
+    for section in ("synthetic_alarm_shifts_si", "dataset_alarm_shifts_si"):
+        loaded_section = loaded.get(section, {})
+        if isinstance(loaded_section, dict):
+            for alarm_key in ("fire", "gas_leak", "flood"):
+                loaded_alarm = loaded_section.get(alarm_key, {})
+                if not isinstance(loaded_alarm, dict):
+                    continue
+                base_alarm = config[section].setdefault(alarm_key, {})
+                for sensor_key, value in loaded_alarm.items():
+                    if isinstance(value, (int, float)):
+                        base_alarm[sensor_key] = float(value)
+
     stream = loaded.get("stream", {})
     if isinstance(stream, dict):
         value = stream.get("interval_ms")
@@ -126,22 +247,24 @@ def _load_config() -> Dict[str, Dict[str, float]]:
     return config
 
 
-def _clip01(value: float) -> float:
-    return round(max(0.0, min(1.0, value)), 4)
+def _clip_range(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
-def _jitter(rng: random.Random, center: float, radius: float) -> float:
-    return _clip01(rng.uniform(center - radius, center + radius))
-
-
-def _alarm_centers(config: Mapping[str, Mapping[str, float]], profile: Mapping[str, bool]) -> Dict[str, float]:
-    n = config["neighborhood"]
-    safe_center = float(n["safe_center"])
-    return {
-        "fire": float(n["fire_center"]) if profile["fire"] else safe_center,
-        "gas_leak": float(n["leak_center"]) if profile["gas_leak"] else safe_center,
-        "flood": float(n["flood_center"]) if profile["flood"] else safe_center,
-    }
+def _sensor_jitter(
+    rng: random.Random,
+    sensor_type: str,
+    value: float,
+    jitter_map: Mapping[str, float],
+) -> float:
+    radius = float(jitter_map.get(sensor_type, jitter_map.get("default", 0.0)))
+    if radius <= 0:
+        result = value
+    else:
+        result = rng.uniform(value - radius, value + radius)
+    if sensor_type in {"flood", "smoke", "leak", "gas_leak", "humidity_pct"}:
+        result = _clip_range(result, 0.0, 1.0)
+    return round(float(result), 6)
 
 
 def _synthetic_batch(
@@ -150,20 +273,45 @@ def _synthetic_batch(
     seed: int,
 ) -> List[List[object]]:
     rng = random.Random(seed)
-    radius = float(config["neighborhood"]["radius"])
-    centers = _alarm_centers(config=config, profile=profile)
+    base_values = dict(config["synthetic_base_si"])
+    shifts = config["synthetic_alarm_shifts_si"]
+    jitter_map = config["synthetic_sensor_radius_si"]
+    if profile["fire"]:
+        for sensor_key, delta in shifts.get("fire", {}).items():
+            base_values[sensor_key] = float(base_values.get(sensor_key, 0.0)) + float(delta)
+    if profile["gas_leak"]:
+        for sensor_key, delta in shifts.get("gas_leak", {}).items():
+            base_values[sensor_key] = float(base_values.get(sensor_key, 0.0)) + float(delta)
+    if profile["flood"]:
+        for sensor_key, delta in shifts.get("flood", {}).items():
+            base_values[sensor_key] = float(base_values.get(sensor_key, 0.0)) + float(delta)
     intrusion_value = 1.0 if profile["intrusion"] else 0.0
     room = DEFAULT_ROOM_ID
 
     return [
-        ["flood", 3001, room, _jitter(rng, centers["flood"], radius)],
-        ["smoke", 1001, room, _jitter(rng, centers["fire"], radius)],
-        ["leak", 2001, room, _jitter(rng, centers["gas_leak"], radius)],
-        ["temp_ambient_c", 1101, room, _jitter(rng, centers["fire"], radius)],
-        ["tvoc_ppb", 1102, room, _jitter(rng, centers["fire"], radius)],
-        ["eco2_ppm", 1103, room, _jitter(rng, centers["fire"], radius)],
-        ["flow_rate_lps", 2101, room, _jitter(rng, centers["gas_leak"], radius)],
-        ["press_pipe_bar", 2102, room, _jitter(rng, centers["gas_leak"], radius)],
+        ["flood", 3001, room, _sensor_jitter(rng, "flood", float(base_values["flood"]), jitter_map)],
+        ["smoke", 1001, room, _sensor_jitter(rng, "smoke", float(base_values["smoke"]), jitter_map)],
+        [
+            "gas_leak",
+            2001,
+            room,
+            _sensor_jitter(rng, "gas_leak", float(base_values.get("gas_leak", base_values.get("leak", 0.0))), jitter_map),
+        ],
+        ["temp_ambient_c", 1101, room, _sensor_jitter(rng, "temp_ambient_c", float(base_values["temp_ambient_c"]), jitter_map)],
+        ["humidity_pct", 1104, room, _sensor_jitter(rng, "humidity_pct", float(base_values["humidity_pct"]), jitter_map)],
+        ["tvoc_ppb", 1102, room, _sensor_jitter(rng, "tvoc_ppb", float(base_values["tvoc_ppb"]), jitter_map)],
+        ["eco2_ppm", 1103, room, _sensor_jitter(rng, "eco2_ppm", float(base_values["eco2_ppm"]), jitter_map)],
+        ["raw_h2", 1105, room, _sensor_jitter(rng, "raw_h2", float(base_values["raw_h2"]), jitter_map)],
+        ["raw_ethanol", 1106, room, _sensor_jitter(rng, "raw_ethanol", float(base_values["raw_ethanol"]), jitter_map)],
+        ["press_ambient_bar", 1107, room, _sensor_jitter(rng, "press_ambient_bar", float(base_values["press_ambient_bar"]), jitter_map)],
+        ["pm1_0", 1108, room, _sensor_jitter(rng, "pm1_0", float(base_values["pm1_0"]), jitter_map)],
+        ["pm2_5", 1109, room, _sensor_jitter(rng, "pm2_5", float(base_values["pm2_5"]), jitter_map)],
+        ["nc0_5", 1110, room, _sensor_jitter(rng, "nc0_5", float(base_values["nc0_5"]), jitter_map)],
+        ["nc1_0", 1111, room, _sensor_jitter(rng, "nc1_0", float(base_values["nc1_0"]), jitter_map)],
+        ["nc2_5", 1112, room, _sensor_jitter(rng, "nc2_5", float(base_values["nc2_5"]), jitter_map)],
+        ["flow_rate_lps", 2101, room, _sensor_jitter(rng, "flow_rate_lps", float(base_values["flow_rate_lps"]), jitter_map)],
+        ["press_pipe_bar", 2102, room, _sensor_jitter(rng, "press_pipe_bar", float(base_values["press_pipe_bar"]), jitter_map)],
+        ["temp_pipe_c", 2103, room, _sensor_jitter(rng, "temp_pipe_c", float(base_values["temp_pipe_c"]), jitter_map)],
         ["door_break", 1, room, intrusion_value],
         ["ir_motion", 2, room, intrusion_value],
     ]
@@ -178,16 +326,14 @@ def _dataset_path(source: str) -> Path:
 
 
 def _row_matches_profile(row: Mapping[str, str], profile: Mapping[str, bool]) -> bool:
+    # Dataset contains reliable label only for fire (`smoke_label`).
+    # For flood/gas_leak/intrusion no ground-truth labels exist, so matching rows in dataset mode is not possible.
+    if profile["flood"] or profile["gas_leak"] or profile["intrusion"]:
+        return False
     smoke_active = int(float(row.get("smoke_label", "0"))) == 1
-    leak_active = int(float(row.get("leak_label", "0"))) == 1
-    any_alarm_checked = any(profile.values())
-    # Datasets include only smoke/leak labels; flood/intrusion values are generated in batch.
-
     if profile["fire"] and not smoke_active:
         return False
-    if profile["gas_leak"] and not leak_active:
-        return False
-    if not any_alarm_checked and (smoke_active or leak_active):
+    if not profile["fire"] and smoke_active:
         return False
     return True
 
@@ -216,19 +362,19 @@ def _adjust_batch_neighborhood(
     seed: int,
 ) -> List[List[object]]:
     rng = random.Random(seed + NEIGHBORHOOD_SEED_OFFSET)
-    radius = float(config["neighborhood"]["radius"])
-    centers = _alarm_centers(config=config, profile=profile)
+    jitter_map = config["dataset_jitter_si"]
+    shifts = config["dataset_alarm_shifts_si"]
     adjusted: List[List[object]] = []
     for sensor_type, sensor_id, room, reading in batch:
         st = str(sensor_type).lower()
-        center = float(reading)
-        if st in FIRE_SENSOR_TYPES:
-            center = centers["fire"]
-        elif st in LEAK_SENSOR_TYPES:
-            center = centers["gas_leak"]
-        elif st in FLOOD_SENSOR_TYPES:
-            center = centers["flood"]
-        adjusted.append([sensor_type, sensor_id, room, _jitter(rng, center, radius)])
+        value = float(reading)
+        if profile["fire"]:
+            value += float(shifts.get("fire", {}).get(st, 0.0))
+        if profile["gas_leak"]:
+            value += float(shifts.get("gas_leak", {}).get(st, 0.0))
+        if profile["flood"]:
+            value += float(shifts.get("flood", {}).get(st, 0.0))
+        adjusted.append([sensor_type, sensor_id, room, _sensor_jitter(rng, st, value, jitter_map)])
     return adjusted
 
 
@@ -241,65 +387,120 @@ def _calc_confusion(expected: int, predicted: int) -> Dict[str, int]:
     }
 
 
+def _build_expected_maps(
+    source_effective: str,
+    profile: Mapping[str, bool],
+    dataset_row: Mapping[str, str] | None,
+) -> Tuple[Dict[str, object], Dict[str, bool], Dict[str, str]]:
+    expected: Dict[str, object] = {}
+    expected_available: Dict[str, bool] = {}
+    expected_notes: Dict[str, str] = {}
+    for key, detector_label in DETECTOR_LABEL_BY_KEY.items():
+        if source_effective == "synthetic":
+            expected[detector_label] = int(profile[key])
+            expected_available[detector_label] = True
+            expected_notes[detector_label] = "expected from synthetic profile"
+            continue
+        if key == "fire" and dataset_row is not None and "smoke_label" in dataset_row:
+            expected[detector_label] = int(float(dataset_row["smoke_label"]))
+            expected_available[detector_label] = True
+            expected_notes[detector_label] = "ground truth from dataset smoke_label"
+            continue
+        expected[detector_label] = None
+        expected_available[detector_label] = False
+        expected_notes[detector_label] = "label not available for this detector in dataset"
+    return expected, expected_available, expected_notes
+
+
 def generate_profiled_batch(
     source: str,
     profile: Mapping[str, bool],
     seed: int,
     config: Mapping[str, Mapping[str, float]],
+    dataset_fallback_to_synthetic: bool = False,
 ) -> Dict[str, object]:
     dataset_path = None
+    source_effective = source
+    fallback_used = False
+    fallback_reason = None
+    selected_row: MutableMapping[str, str] | None = None
     if source == "synthetic":
         batch = _synthetic_batch(profile=profile, config=config, seed=seed)
         selected_row_index = None
     else:
         dataset_path = str(_dataset_path(source))
-        row, selected_row_index = _pick_dataset_row(source=source, profile=profile, seed=seed)
-        batch = dataframe_row_to_batch(row)
-        batch = _adjust_batch_neighborhood(batch=batch, profile=profile, config=config, seed=seed)
-        intrusion_value = 1.0 if profile["intrusion"] else 0.0
-        batch.extend(
-            [
-                ["door_break", 1, DEFAULT_ROOM_ID, intrusion_value],
-                ["ir_motion", 2, DEFAULT_ROOM_ID, intrusion_value],
-            ]
-        )
-        if "flood" not in {str(item[0]).lower() for item in batch}:
-            radius = float(config["neighborhood"]["radius"])
-            center = _alarm_centers(config=config, profile=profile)["flood"]
-            batch.append(
-                ["flood", 3001, DEFAULT_ROOM_ID, _jitter(random.Random(seed + FLOOD_SEED_OFFSET), center, radius)]
+        try:
+            selected_row, selected_row_index = _pick_dataset_row(source=source, profile=profile, seed=seed)
+            batch = dataframe_row_to_batch(selected_row)
+            batch = _adjust_batch_neighborhood(batch=batch, profile=profile, config=config, seed=seed)
+            intrusion_value = 1.0 if profile["intrusion"] else 0.0
+            batch.extend(
+                [
+                    ["door_break", 1, DEFAULT_ROOM_ID, intrusion_value],
+                    ["ir_motion", 2, DEFAULT_ROOM_ID, intrusion_value],
+                ]
             )
+            if "flood" not in {str(item[0]).lower() for item in batch}:
+                base_flood = float(config["synthetic_base_si"]["flood"])
+                flood_shift = float(config["dataset_alarm_shifts_si"]["flood"].get("flood", 0.0))
+                center = base_flood + (flood_shift if profile["flood"] else 0.0)
+                batch.append(
+                    [
+                        "flood",
+                        3001,
+                        DEFAULT_ROOM_ID,
+                        _sensor_jitter(
+                            random.Random(seed + FLOOD_SEED_OFFSET),
+                            "flood",
+                            center,
+                            config["synthetic_sensor_radius_si"],
+                        ),
+                    ]
+                )
+        except ValueError as exc:
+            if not dataset_fallback_to_synthetic:
+                raise
+            source_effective = "synthetic"
+            fallback_used = True
+            fallback_reason = str(exc)
+            selected_row_index = None
+            batch = _synthetic_batch(profile=profile, config=config, seed=seed)
 
     predicted = process_sensor_batch(batch)
-    expected = {
-        "Затопление": int(profile["flood"]),
-        "Пожар": int(profile["fire"]),
-        "Утечка Газа": int(profile["gas_leak"]),
-        "Проникновение": int(profile["intrusion"]),
+    expected, expected_available, expected_notes = _build_expected_maps(
+        source_effective=source_effective,
+        profile=profile,
+        dataset_row=selected_row,
+    )
+    predicted_map = {
+        "Затопление": int(predicted[0]),
+        "Пожар": int(predicted[1]),
+        "Утечка газа": int(predicted[2]),
+        "Проникновение": int(predicted[3]),
     }
-    confusion = {
-        "Затопление": _calc_confusion(expected["Затопление"], int(predicted[0])),
-        "Пожар": _calc_confusion(expected["Пожар"], int(predicted[1])),
-        "Утечка Газа": _calc_confusion(expected["Утечка Газа"], int(predicted[2])),
-        "Проникновение": _calc_confusion(expected["Проникновение"], int(predicted[3])),
-    }
+    confusion: Dict[str, Dict[str, int]] = {}
+    for detector in DETECTOR_LABELS:
+        if expected_available.get(detector):
+            confusion[detector] = _calc_confusion(int(expected[detector]), predicted_map[detector])
+        else:
+            confusion[detector] = {"TP": 0, "FP": 0, "TN": 0, "FN": 0}
 
     return {
         "seed": seed,
         "source": source,
+        "source_effective": source_effective,
+        "fallback_used": fallback_used,
+        "fallback_reason": fallback_reason,
         "dataset_path": dataset_path,
         "config_path": str(CONFIG_PATH),
-        "radius": config["neighborhood"]["radius"],
+        "radius": config["synthetic_sensor_radius_si"].get("default", 0.0),
         "profile": dict(profile),
         "selected_dataset_row_index": selected_row_index,
         "sensor_types_count": len({item[0] for item in batch}),
         "expected": expected,
-        "predicted": {
-            "Затопление": int(predicted[0]),
-            "Пожар": int(predicted[1]),
-            "Утечка Газа": int(predicted[2]),
-            "Проникновение": int(predicted[3]),
-        },
+        "expected_available": expected_available,
+        "expected_notes": expected_notes,
+        "predicted": predicted_map,
         "confusion_matrix": confusion,
         "batch": batch,
     }
@@ -364,7 +565,7 @@ class SensorGeneratorWindow(QMainWindow):
             self.source_box.addItem(option["label"], option["key"])
         controls.addWidget(self.source_box, 0, 1)
         controls.addWidget(
-            QLabel(f"Окрестность (из конфига): радиус = {self.config['neighborhood']['radius']}"),
+            QLabel("Параметры генерации берутся из SI-конфига (см. qt_sensor_generator_config.json)."),
             1,
             0,
             1,
@@ -373,12 +574,15 @@ class SensorGeneratorWindow(QMainWindow):
 
         self.fire_alarm_box = QCheckBox("Пожар")
         self.flood_alarm_box = QCheckBox("Затопление")
-        self.gas_leak_alarm_box = QCheckBox("Утечка Газа")
+        self.gas_leak_alarm_box = QCheckBox("Утечка газа")
         self.intrusion_alarm_box = QCheckBox("Проникновение")
         controls.addWidget(self.fire_alarm_box, 2, 0, 1, 1)
         controls.addWidget(self.flood_alarm_box, 2, 1, 1, 1)
         controls.addWidget(self.gas_leak_alarm_box, 2, 2, 1, 1)
         controls.addWidget(self.intrusion_alarm_box, 2, 3, 1, 1)
+        self.dataset_fallback_box = QCheckBox("Замещать пропуски датасетов (fallback на synthetic)")
+        self.dataset_fallback_box.setChecked(True)
+        controls.addWidget(self.dataset_fallback_box, 3, 0, 1, 4)
 
         main_layout.addLayout(controls)
 
@@ -405,7 +609,7 @@ class SensorGeneratorWindow(QMainWindow):
             "Если галочки сняты: безопасная окрестность (без сработок). "
             "Галочки смещают окрестность в зону сработок. "
             "Для режимов «Безопасный датасет»/«Полный датасет» подтягиваются строки "
-            "под выбранные сработки. "
+            "под профили с доступными метками; для недоступных меток можно включить synthetic fallback. "
             "Сид берется автоматически как текущее Unix-время в секундах."
         )
         self.note.setWordWrap(True)
@@ -449,8 +653,14 @@ class SensorGeneratorWindow(QMainWindow):
                 return option["label"]
         return source
 
-    def _accumulate_metrics(self, confusion_matrix: Mapping[str, Mapping[str, int]]) -> None:
+    def _accumulate_metrics(
+        self,
+        confusion_matrix: Mapping[str, Mapping[str, int]],
+        expected_available: Mapping[str, bool],
+    ) -> None:
         for detector in DETECTOR_LABELS:
+            if not expected_available.get(detector, False):
+                continue
             detector_metrics = confusion_matrix.get(detector, {})
             totals = self._metrics_totals.setdefault(detector, {"TP": 0, "FP": 0, "TN": 0, "FN": 0})
             for metric in ("TP", "FP", "TN", "FN"):
@@ -467,24 +677,44 @@ class SensorGeneratorWindow(QMainWindow):
             self.dataset_status.setText("Датасет: не использован.")
             return
         source = str(self._payload.get("source", ""))
+        source_effective = str(self._payload.get("source_effective", source))
         source_label = self._source_label(source)
-        if source == "synthetic":
-            self.dataset_status.setText(f"Источник: {source_label} (без чтения CSV).")
+        source_effective_label = self._source_label(source_effective)
+        if source_effective == "synthetic":
+            if source == "synthetic":
+                self.dataset_status.setText(f"Источник: {source_label} (без чтения CSV).")
+            else:
+                self.dataset_status.setText(
+                    f"Источник: {source_label}, факт: {source_effective_label} (fallback, CSV-профиль не найден)."
+                )
             return
         idx = self._payload.get("selected_dataset_row_index")
         path = self._payload.get("dataset_path", "")
-        self.dataset_status.setText(f"Источник: {source_label}, строка CSV: {idx}, файл: {path}")
+        fallback_used = bool(self._payload.get("fallback_used", False))
+        fallback_suffix = " [fallback synthetic]" if fallback_used else ""
+        self.dataset_status.setText(
+            f"Источник: {source_label}, факт: {source_effective_label}{fallback_suffix}, строка CSV: {idx}, файл: {path}"
+        )
 
     def _generate_once(self) -> bool:
         try:
             seed = int(time.time())
             source = str(self.source_box.currentData())
             profile = self._profile()
-            self._payload = generate_profiled_batch(source=source, profile=profile, seed=seed, config=self.config)
+            self._payload = generate_profiled_batch(
+                source=source,
+                profile=profile,
+                seed=seed,
+                config=self.config,
+                dataset_fallback_to_synthetic=self.dataset_fallback_box.isChecked(),
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка генерации", str(exc))
             return False
-        self._accumulate_metrics(self._payload.get("confusion_matrix", {}))
+        self._accumulate_metrics(
+            self._payload.get("confusion_matrix", {}),
+            self._payload.get("expected_available", {}),
+        )
         self._fill_metrics(self._metrics_totals)
         self.output.setPlainText(json.dumps(self._payload, ensure_ascii=False, indent=2))
         self._update_dataset_status()
