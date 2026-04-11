@@ -11,6 +11,7 @@ from generate_sensor_batch import dataframe_row_to_batch, generate_batch
 BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
+import emergency_system as emergency_system_module  # type: ignore[import-not-found]
 from emergency_system import process_sensor_batch, reset_state  # type: ignore[import-not-found]
 
 UNIFIED_DATASET_PATH = BASE_DIR / "test" / "unified_test_clean.csv"
@@ -274,6 +275,27 @@ def evaluate_synthetic_mode_independence() -> None:
     print("Synthetic isolation scenarios passed.")
 
 
+def evaluate_flood_safety_gate() -> None:
+    """Validate that high flood signal cannot be suppressed by ML output."""
+    reset_state()
+    original_detect_flood_ml = emergency_system_module.detect_flood_ml
+    emergency_system_module.detect_flood_ml = lambda packets: 0  # force ML-negative path
+    try:
+        flood_batch = [
+            ["flood", 3001, 101, 0.97],
+            ["door_break", 1, 101, 0.0],
+            ["ir_motion", 2, 101, 0.0],
+        ]
+        result = run_emergency_system(flood_batch)
+        if result[0] != 1:
+            raise RuntimeError(
+                f"Flood safety gate failed: expected flood alarm=1 with high flood reading, got: {result}"
+            )
+    finally:
+        emergency_system_module.detect_flood_ml = original_detect_flood_ml
+    print(f"Flood safety-gate scenario passed: {result}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Runs emergency_system against dataset-derived and generated batches."
@@ -303,6 +325,7 @@ def main() -> None:
         evaluate_dataset_mode_generation()
     if not args.skip_synthetic_isolation:
         evaluate_synthetic_mode_independence()
+    evaluate_flood_safety_gate()
     if not args.skip_dataset:
         evaluate_dataset(args.dataset, args.limit)
 

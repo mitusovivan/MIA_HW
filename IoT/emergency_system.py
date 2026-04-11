@@ -123,9 +123,24 @@ FLOOD_FEATURE_MAP = {
     "waterlevel": "flood_level_norm",
     "rain": "flood_level_norm",
     "drain": "flood_level_norm",
+    "gas_leak": "Leak_Status",
+    "leak": "Leak_Status",
+    "water_leak": "Leak_Status",
+    "flow_rate_lps": "Flow_Rate_L/s",
+    "flow_rate": "Flow_Rate_L/s",
+    "flow": "Flow_Rate_L/s",
+    "press_pipe_bar": "Pressure_bar",
+    "pipe_pressure": "Pressure_bar",
+    "temp_pipe_c": "Temperature_C",
 }
 FIRE_RAW_FEATURE_COLUMNS = list(FIRE_FEATURE_MAP.values())
-FLOOD_RAW_FEATURE_COLUMNS = ["flood_level_norm"]
+FLOOD_RAW_FEATURE_COLUMNS = [
+    "flood_level_norm",
+    "Leak_Status",
+    "Flow_Rate_L/s",
+    "Pressure_bar",
+    "Temperature_C",
+]
 
 _FIRE_HISTORY: MutableMapping[str, Deque[Dict[str, float]]] = defaultdict(lambda: deque(maxlen=WINDOW_SIZE))
 _FLOOD_HISTORY: MutableMapping[str, Deque[Dict[str, float]]] = defaultdict(lambda: deque(maxlen=WINDOW_SIZE))
@@ -193,6 +208,42 @@ GAS_LEAK_SI_SENSOR_THRESHOLDS = {
     "raw_h2": 15000.0,
     "raw_ethanol": 23000.0,
 }
+
+
+def _normalize_rolling_feature_name(feature_name: object) -> str:
+    return str(feature_name).replace(" ", "_").replace("(", "").replace(")", "").replace("°", "").strip()
+
+
+def _expected_rolling_feature_names(raw_feature_columns: Sequence[str]) -> Set[str]:
+    return {
+        _normalize_rolling_feature_name(f"{raw_column}_{agg}")
+        for raw_column in raw_feature_columns
+        for agg in ("mean", "std", "max", "min")
+    }
+
+
+def _model_matches_feature_pipeline(
+    pkg: Mapping[str, object],
+    raw_feature_columns: Sequence[str],
+    model_filename: str,
+) -> bool:
+    model_features = pkg.get("features")
+    if not isinstance(model_features, Sequence):
+        return False
+    expected_features = _expected_rolling_feature_names(raw_feature_columns)
+    if not expected_features:
+        return False
+    actual_features = {_normalize_rolling_feature_name(feature_name) for feature_name in model_features}
+    unexpected_features = sorted(actual_features - expected_features)
+    if unexpected_features:
+        preview = ", ".join(unexpected_features[:3])
+        _warn_once(
+            "Model feature set "
+            f"{model_filename} is incompatible with detector features. "
+            f"Unexpected features outside detector pipeline: {preview}. Falling back to threshold logic."
+        )
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -488,6 +539,12 @@ def _detect_with_model_or_fallback(
     pkg = _load_model_package(model_filename)
     if pkg is None:
         return int(fallback_fn(packets))
+    if not _model_matches_feature_pipeline(
+        pkg=pkg,
+        raw_feature_columns=raw_feature_columns,
+        model_filename=model_filename,
+    ):
+        return int(fallback_fn(packets))
 
     room_updates = _collect_room_feature_updates(packets, feature_map)
     if not room_updates:
@@ -538,6 +595,10 @@ def detect_flood_ml(packets: List[SensorPacket]) -> int:
 
 
 def detect_flood(packets: List[SensorPacket]) -> int:
+    # Safety gate: explicit high flood sensor readings must always trigger alarm.
+    # Prevents model-specific false negatives when flood profile is active.
+    if detect_flood_threshold(packets) == 1:
+        return 1
     return detect_flood_ml(packets)
 
 
